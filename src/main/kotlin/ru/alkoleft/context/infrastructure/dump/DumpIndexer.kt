@@ -321,7 +321,8 @@ class DumpIndexer(
                                     val newId = routineIdsByName[name.lowercase(Locale.ROOT)]
                                     connection
                                         .prepareStatement(
-                                            "UPDATE calls SET target_routine_id = ?, external = ? WHERE target_routine_id = ?",
+                                            "UPDATE calls SET target_routine_id = ?, external = ? " +
+                                                "WHERE target_routine_id = ? AND module_id <> ?",
                                         ).use { statement ->
                                             if (newId != null) {
                                                 statement.setLong(1, newId)
@@ -331,6 +332,7 @@ class DumpIndexer(
                                                 statement.setString(2, "$path:$name")
                                             }
                                             statement.setLong(3, oldId)
+                                            statement.setLong(4, newModuleId)
                                             statement.executeUpdate()
                                         }
                                 }
