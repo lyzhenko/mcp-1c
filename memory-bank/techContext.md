@@ -82,6 +82,12 @@ MCP-сервер занимает основной поток раньше `Appl
 - `dumpGrep(pattern, regex?, ignoreCase?, extensions?, paths?, context?, limit?, deadlineMs?)`
 - `dumpEntrypoints(kind?, metadata?, limit?)`
 - `dumpCheck(path?, id?, text?)`
+- `dumpNode(id)`
+- `dumpNeighbors(id, direction?, kinds?, limit?)`
+- `dumpTypes(path?, id?, text?)`
+- `dumpRights(role?, metadata?, condition?, limit?)`
+- `dumpSimilar(path?, id?, text?, routine?, limit?)`
+- `dumpConventions(path?, id?, text?)`
 - `dumpReload()`
 - `status()`
 
