@@ -99,6 +99,9 @@ class DumpStorage(
     @Volatile
     private var lastSignature: String = ""
 
+    @Volatile
+    private var moduleStamps: Map<String, Long>? = null
+
     /** Открыть выгрузку из `--dump`, если она задана. */
     @PostConstruct
     fun init() {
@@ -217,6 +220,21 @@ class DumpStorage(
         }
     }
 
+    private fun scanModuleStamps(): Map<String, Long> {
+        val result = mutableMapOf<String, Long>()
+        for (root in roots()) {
+            Files.walk(root).use { stream ->
+                stream
+                    .filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(".bsl", ignoreCase = true) }
+                    .forEach { file ->
+                        result[root.relativize(file).toString().replace('\\', '/')] =
+                            runCatching { Files.getLastModifiedTime(file).toMillis() }.getOrDefault(0)
+                    }
+            }
+        }
+        return result
+    }
+
     private fun startWatcher() {
         if (options.watchSeconds <= 0 || watcher?.isAlive == true) return
         watcher =
@@ -234,8 +252,36 @@ class DumpStorage(
                                     }.getOrDefault(0L).toString()
                                 }
                             if (lastSignature.isNotEmpty() && signature != lastSignature) {
-                                logger.info { "Выгрузка изменилась, перестраиваю индекс" }
-                                reload()
+                                val current = runCatching { scanModuleStamps() }.getOrDefault(emptyMap())
+                                val previous = moduleStamps
+                                if (previous != null && state == State.READY) {
+                                    val changed = current.filter { previous[it.key] != it.value }.keys
+                                    val deleted = previous.keys - current.keys
+                                    val touched = changed + deleted
+                                    val modulesOnly = touched.all { it.endsWith(".bsl") }
+                                    if (modulesOnly && touched.isNotEmpty()) {
+                                        try {
+                                            val updated =
+                                                indexer.updateModules(
+                                                    indexFile(dumpPath!!),
+                                                    roots,
+                                                    changed,
+                                                    deleted,
+                                                )
+                                            moduleStamps = current
+                                            logger.info { "Частично обновлено модулей: $updated" }
+                                        } catch (failure: Throwable) {
+                                            logger.warn { "Частичное обновление не удалось: ${failure.message}" }
+                                            reload()
+                                            moduleStamps = null
+                                        }
+                                    } else {
+                                        reload()
+                                        moduleStamps = null
+                                    }
+                                } else {
+                                    moduleStamps = current
+                                }
                             }
                             lastSignature = signature
                         } catch (_: InterruptedException) {
@@ -267,6 +313,7 @@ class DumpStorage(
                     monitor.notifyAll()
                 }
                 logger.info { "Индекс выгрузки открыт: $indexFile (${Files.size(indexFile)} байт)" }
+                moduleStamps = runCatching { scanModuleStamps() }.getOrNull()
                 return
             }
 
@@ -284,6 +331,7 @@ class DumpStorage(
                 progress = null
                 monitor.notifyAll()
             }
+            moduleStamps = runCatching { scanModuleStamps() }.getOrNull()
         } catch (failure: Throwable) {
             logger.error(failure) { "Не удалось построить индекс выгрузки" }
             synchronized(monitor) {

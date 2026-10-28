@@ -122,6 +122,239 @@ class DumpIndexer(
         return info.copy(indexBytes = runCatching { Files.size(indexFile) }.getOrDefault(0))
     }
 
+    /**
+     * Частично обновить индекс: перечитать изменившиеся и удалить исчезнувшие модули `.bsl`.
+     *
+     * Метаданные, формы, роли и точки входа при изменении требуют полной перестройки —
+     * этим занимается [DumpStorage]. Возвращает число обновлённых модулей.
+     */
+    fun updateModules(
+        indexFile: Path,
+        roots: List<Path>,
+        changed: Set<String>,
+        deleted: Set<String> = emptySet(),
+    ): Int {
+        require(Files.isRegularFile(indexFile)) { "Индекс не найден: $indexFile" }
+        val sources = effectiveSources(roots)
+        var updated = 0
+        DriverManager.getConnection("jdbc:sqlite:${indexFile.toAbsolutePath()}").use { connection ->
+            val objectDirs = mutableMapOf<String, Long>()
+            connection.createStatement().use { statement ->
+                statement.executeQuery("SELECT id, path FROM objects").use { rows ->
+                    while (rows.next()) {
+                        objectDirs[rows.getString("path").removeSuffix(".xml")] = rows.getLong("id")
+                    }
+                }
+            }
+            connection.autoCommit = false
+            connection
+                .prepareStatement("SELECT id, name FROM routines WHERE module_id = (SELECT id FROM modules WHERE path = ?)")
+                .use { oldRoutinesStatement ->
+                    connection
+                        .prepareStatement(
+                            "SELECT r.id FROM routines r JOIN modules m ON m.id = r.module_id WHERE m.path = ? AND r.name_lower = ?",
+                        ).use { targetStatement ->
+                            for (path in changed + deleted) {
+                                val moduleId =
+                                    connection.prepareStatement("SELECT id FROM modules WHERE path = ?").use { statement ->
+                                        statement.setString(1, path)
+                                        statement.executeQuery().use { rows -> if (rows.next()) rows.getLong(1) else null }
+                                    }
+                                val oldRoutines =
+                                    moduleId
+                                        ?.let {
+                                            oldRoutinesStatement.setString(1, path)
+                                            oldRoutinesStatement.executeQuery().use { rows ->
+                                                buildList {
+                                                    while (rows.next()) add(rows.getLong(1) to rows.getString(2))
+                                                }
+                                            }
+                                        }.orEmpty()
+
+                                if (moduleId != null) {
+                                    for (table in listOf("calls", "metadata_refs", "routines")) {
+                                        connection.prepareStatement("DELETE FROM $table WHERE module_id = ?").use { statement ->
+                                            statement.setLong(1, moduleId)
+                                            statement.executeUpdate()
+                                        }
+                                    }
+                                    connection.prepareStatement("DELETE FROM modules WHERE id = ?").use { statement ->
+                                        statement.setLong(1, moduleId)
+                                        statement.executeUpdate()
+                                    }
+                                }
+
+                                val source = sources[path]
+                                if (source == null || path in deleted) {
+                                    for ((routineId, name) in oldRoutines) {
+                                        connection
+                                            .prepareStatement(
+                                                "UPDATE calls SET target_routine_id = NULL, external = COALESCE(external, ?) " +
+                                                    "WHERE target_routine_id = ?",
+                                            ).use { statement ->
+                                                statement.setString(1, "$path:$name")
+                                                statement.setLong(2, routineId)
+                                                statement.executeUpdate()
+                                            }
+                                    }
+                                    continue
+                                }
+
+                                val text = DumpTextReader.read(source)
+                                val parsed = BslParser.parse(text)
+                                val ownerId = ownerId(path, objectDirs)
+                                connection
+                                    .prepareStatement(
+                                        "INSERT INTO modules(object_id, path, kind, lines, bytes) VALUES (?, ?, ?, ?, ?)",
+                                    ).use { statement ->
+                                        ownerId?.let { statement.setLong(1, it) }
+                                            ?: statement.setNull(1, java.sql.Types.INTEGER)
+                                        statement.setString(2, path)
+                                        statement.setString(3, moduleKind(path, ownerId, objectDirs))
+                                        statement.setInt(4, parsed.lines)
+                                        statement.setLong(5, runCatching { Files.size(source) }.getOrDefault(0))
+                                        statement.executeUpdate()
+                                    }
+                                val newModuleId = lastInsertId(connection)
+                                val routineIds = mutableListOf<Long>()
+                                val routineIdsByName = mutableMapOf<String, Long>()
+                                for (routine in parsed.routines) {
+                                    connection
+                                        .prepareStatement(
+                                            "INSERT INTO routines(" +
+                                                "module_id, name, name_lower, kind, is_export, parameters, " +
+                                                "start_line, end_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                        ).use { statement ->
+                                            statement.setLong(1, newModuleId)
+                                            statement.setString(2, routine.name)
+                                            statement.setString(3, routine.name.lowercase(Locale.ROOT))
+                                            statement.setString(4, routine.kind)
+                                            statement.setInt(5, if (routine.export) 1 else 0)
+                                            statement.setString(
+                                                6,
+                                                routine.parameters.joinToString(", ") {
+                                                    if (it.hasDefault) "${it.name}=" else it.name
+                                                },
+                                            )
+                                            statement.setInt(7, routine.startLine)
+                                            statement.setInt(8, routine.endLine)
+                                            statement.executeUpdate()
+                                        }
+                                    val id = lastInsertId(connection)
+                                    routineIds += id
+                                    routineIdsByName[routine.name.lowercase(Locale.ROOT)] = id
+                                }
+                                for (ref in parsed.metadataRefs + parsed.routines.flatMap { it.metadataRefs }) {
+                                    val index = parsed.routines.indexOfFirst { ref.line in it.startLine..it.endLine }
+                                    connection
+                                        .prepareStatement(
+                                            "INSERT INTO metadata_refs(" +
+                                                "module_id, routine_id, object_name, object_name_lower, " +
+                                                "collection, context, line) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                        ).use { statement ->
+                                            statement.setLong(1, newModuleId)
+                                            if (index >= 0) {
+                                                statement.setLong(2, routineIds[index])
+                                            } else {
+                                                statement.setNull(2, java.sql.Types.INTEGER)
+                                            }
+                                            statement.setString(3, ref.objectName)
+                                            statement.setString(4, ref.objectName.lowercase(Locale.ROOT))
+                                            statement.setString(5, ref.collection)
+                                            statement.setString(6, ref.context)
+                                            statement.setInt(7, ref.line)
+                                            statement.executeUpdate()
+                                        }
+                                }
+                                for (call in parsed.calls + parsed.routines.flatMap { it.calls }) {
+                                    val routineIndex = parsed.routines.indexOfFirst { call.line in it.startLine..it.endLine }
+                                    var target: Long? = null
+                                    var external: String? = null
+                                    if (call.kind == "new") {
+                                        external = "Новый ${call.name}"
+                                    } else if (!call.qualified) {
+                                        target = routineIdsByName[call.name.lowercase(Locale.ROOT)]
+                                    } else if (!call.qualifier.isNullOrBlank()) {
+                                        targetStatement.setString(
+                                            1,
+                                            "CommonModules/${call.qualifier}/Ext/Module.bsl",
+                                        )
+                                        targetStatement.setString(2, call.name.lowercase(Locale.ROOT))
+                                        target =
+                                            targetStatement.executeQuery().use { rows ->
+                                                if (rows.next()) rows.getLong(1) else null
+                                            }
+                                    }
+                                    if (target == null && external == null) {
+                                        external =
+                                            if (call.qualified) {
+                                                "${call.qualifier ?: ""}.${call.name}"
+                                            } else {
+                                                call.name
+                                            }
+                                    }
+                                    connection
+                                        .prepareStatement(
+                                            "INSERT INTO calls(" +
+                                                "module_id, routine_id, callee, callee_lower, qualifier, kind, " +
+                                                "line, target_routine_id, external) " +
+                                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                        ).use { statement ->
+                                            statement.setLong(1, newModuleId)
+                                            if (routineIndex >= 0) {
+                                                statement.setLong(2, routineIds[routineIndex])
+                                            } else {
+                                                statement.setNull(2, java.sql.Types.INTEGER)
+                                            }
+                                            statement.setString(3, call.name)
+                                            statement.setString(4, call.name.lowercase(Locale.ROOT))
+                                            statement.setString(5, call.qualifier)
+                                            statement.setString(6, call.kind)
+                                            statement.setInt(7, call.line)
+                                            target?.let { statement.setLong(8, it) }
+                                                ?: statement.setNull(8, java.sql.Types.INTEGER)
+                                            statement.setString(9, external)
+                                            statement.executeUpdate()
+                                        }
+                                }
+                                for ((oldId, name) in oldRoutines) {
+                                    val newId = routineIdsByName[name.lowercase(Locale.ROOT)]
+                                    connection
+                                        .prepareStatement(
+                                            "UPDATE calls SET target_routine_id = ?, external = ? WHERE target_routine_id = ?",
+                                        ).use { statement ->
+                                            if (newId != null) {
+                                                statement.setLong(1, newId)
+                                                statement.setString(2, null)
+                                            } else {
+                                                statement.setNull(1, java.sql.Types.INTEGER)
+                                                statement.setString(2, "$path:$name")
+                                            }
+                                            statement.setLong(3, oldId)
+                                            statement.executeUpdate()
+                                        }
+                                }
+                                updated++
+                            }
+                        }
+                }
+            connection.prepareStatement("INSERT OR REPLACE INTO meta(key, value) VALUES ('dump.indexedAt', ?)").use {
+                it.setString(1, System.currentTimeMillis().toString())
+                it.executeUpdate()
+            }
+            connection.commit()
+        }
+        return updated
+    }
+
+    private fun lastInsertId(connection: java.sql.Connection): Long =
+        connection.createStatement().use { statement ->
+            statement.executeQuery("SELECT last_insert_rowid()").use { rows ->
+                rows.next()
+                rows.getLong(1)
+            }
+        }
+
     private fun writeIndex(
         indexFile: Path,
         root: String,
