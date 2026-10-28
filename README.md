@@ -409,7 +409,7 @@ SSE-вариант: [Dockerfile.sse](Dockerfile.sse) и [documentation/03_DOCKER
 Структура:
 
 ```
-src/main/kotlin/ru/alkoleft/context/
+src/main/kotlin/com/alexqsoft/
   business/        домен: сущности, поиск, страницы, сервисы
   infrastructure/  hbk-парсер, локатор платформ, кэш, каталог; dump-парсер, SQLite-индекс
   presentation/    MCP-инструменты, JSON-ответы, CLI, бенчмарк

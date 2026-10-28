@@ -236,9 +236,9 @@ java -jar build/libs/mcp-bsl-context-*.jar `
 
 ## Ключевые файлы
 
-- `src/main/kotlin/ru/alkoleft/context/infrastructure/dump/` — парсеры, индекс, хранилище.
-- `src/main/kotlin/ru/alkoleft/context/business/services/` — `DumpService`, `DumpCheckService`,
+- `src/main/kotlin/com/alexqsoft/infrastructure/dump/` — парсеры, индекс, хранилище.
+- `src/main/kotlin/com/alexqsoft/business/services/` — `DumpService`, `DumpCheckService`,
   `DumpGraphService`, `DumpRightsService`, `DumpSimilarService`, `DumpConventionsService`.
-- `src/main/kotlin/ru/alkoleft/context/presentation/mcp/DumpMcpController.kt` — MCP-инструменты.
-- `src/main/kotlin/ru/alkoleft/context/presentation/formatters/DumpJsonService.kt` — JSON-ответы.
+- `src/main/kotlin/com/alexqsoft/presentation/mcp/DumpMcpController.kt` — MCP-инструменты.
+- `src/main/kotlin/com/alexqsoft/presentation/formatters/DumpJsonService.kt` — JSON-ответы.
 - `src/test/resources/dump/` — синтетическая выгрузка для тестов.

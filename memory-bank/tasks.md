@@ -29,7 +29,7 @@
 
 ### 1. Спроектированная архитектура тестов
 ```
-src/test/kotlin/ru/alkoleft/context/platform/mcp/integration/
+src/test/kotlin/com/alexqsoft/platform/mcp/integration/
 ├── McpServerIntegrationTest.kt          # Основной интеграционный тест (Integration Layer)
 ├── McpToolsIntegrationTest.kt           # Тесты всех MCP инструментов (Integration Layer)
 ├── McpErrorHandlingTest.kt              # Тесты обработки ошибок (Integration Layer)

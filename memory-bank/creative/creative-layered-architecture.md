@@ -222,7 +222,7 @@
 
 ### Структура пакетов:
 ```
-ru.alkoleft.context/
+com.alexqsoft/
 ├── presentation/           # PRESENTATION LAYER
 │   ├── mcp/               # MCP Server components
 │   ├── rest/              # REST API controllers

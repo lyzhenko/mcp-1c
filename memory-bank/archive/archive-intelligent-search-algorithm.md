@@ -328,8 +328,8 @@ void testWordOrderSearch() {
 1. **Техническое задание**: Содержалось в `memory-bank/tasks.md`
 2. **Креативная фаза**: `memory-bank/creative/creative-intelligent-search-algorithm.md`
 3. **Рефлексия**: `memory-bank/reflection/reflection-intelligent-search-algorithm.md`
-4. **Исходный код**: `src/main/java/ru/alkoleft/context/platform/mcp/PlatformApiSearchService.java`
-5. **Тесты**: `src/test/java/ru/alkoleft/context/platform/mcp/PlatformApiSearchServiceIntelligentTest.java`
+4. **Исходный код**: `src/main/java/com/alexqsoft/platform/mcp/PlatformApiSearchService.java`
+5. **Тесты**: `src/test/java/com/alexqsoft/platform/mcp/PlatformApiSearchServiceIntelligentTest.java`
 
 ### Ключевые решения
 1. **Архитектурный выбор**: Единый метод с цепочкой алгоритмов

@@ -227,7 +227,7 @@
 
 ### Структура файлов:
 ```
-src/test/kotlin/ru/alkoleft/context/platform/mcp/integration/
+src/test/kotlin/com/alexqsoft/platform/mcp/integration/
 ├── McpServerIntegrationTest.kt          # Основной интеграционный тест
 ├── McpToolsIntegrationTest.kt           # Тесты всех MCP инструментов
 ├── McpErrorHandlingTest.kt              # Тесты обработки ошибок
