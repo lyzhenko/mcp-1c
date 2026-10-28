@@ -113,7 +113,7 @@
 ```json
 {
   "state": "ready",
-  "server": {"name": "mcp-bsl-context", "version": "0.4.0", "tools": ["search", "…", "status"]},
+  "server": {"name": "mcp-1c", "version": "0.4.0", "tools": ["search", "…", "status"]},
   "platform": {
     "version": "8.3.27.2214",
     "locale": "ru",
@@ -125,7 +125,7 @@
     "loadMillis": 2100
   },
   "catalog": {"types": 1739, "methods": 500, "properties": 100, "enums": 681, "total": 3020},
-  "cache": {"enabled": true, "dir": "C:\\Users\\…\\mcp-bsl-context", "file": "…json", "sizeBytes": 17321169},
+  "cache": {"enabled": true, "dir": "C:\\Users\\…\\mcp-1c", "file": "…json", "sizeBytes": 17321169},
   "availablePlatforms": [{"version": "8.3.27.2214", "path": "…\\bin", "locales": ["root", "ru"]}],
   "options": {"locale": "ru", "version": null, "waitTimeoutMs": 25000, "responseLimit": 24000}
 }

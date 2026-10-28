@@ -10,7 +10,7 @@
 
 ```bash
 ./gradlew clean bootJar
-# build/libs/mcp-bsl-context-<версия>.jar
+# build/libs/mcp-1c-<версия>.jar
 ```
 
 `clean` нужен, чтобы в `build/libs` не накапливались jar прошлых версий: имя содержит версию и
@@ -21,7 +21,7 @@
 **bash (Linux, macOS, Git Bash):**
 
 ```bash
-jar=$(ls -t build/libs/mcp-bsl-context-*.jar | head -1)
+jar=$(ls -t build/libs/mcp-1c-*.jar | head -1)
 
 # платформа в стандартном каталоге — путь можно не указывать
 java -Dfile.encoding=UTF-8 -jar "$jar"
@@ -37,7 +37,7 @@ java -Dfile.encoding=UTF-8 -jar "$jar" --version 8.3.27 --locale ru
 **PowerShell (Windows):**
 
 ```powershell
-$jar = (Get-ChildItem build/libs/mcp-bsl-context-*.jar |
+$jar = (Get-ChildItem build/libs/mcp-1c-*.jar |
         Sort-Object LastWriteTime | Select-Object -Last 1).FullName
 
 # платформа в стандартном каталоге — путь можно не указывать
@@ -113,16 +113,16 @@ java "-Dfile.encoding=UTF-8" -jar $jar --version 8.3.27 --locale ru
 PLATFORM_CONTEXT_PATH="/opt/1cv8/x86_64/8.3.27.2214" \
 PLATFORM_LOCALE=ru \
 LOG_FILE="/tmp/mcp-server.log" \
-java -jar build/libs/mcp-bsl-context.jar
+java -jar build/libs/mcp-1c.jar
 ```
 
 ## Кэш
 
 Разобранная модель кэшируется в JSON:
 
-- Windows: `%LOCALAPPDATA%\mcp-bsl-context`
-- Linux: `~/.cache/mcp-bsl-context`
-- macOS: `~/Library/Caches/mcp-bsl-context`
+- Windows: `%LOCALAPPDATA%\mcp-1c`
+- Linux: `~/.cache/mcp-1c`
+- macOS: `~/Library/Caches/mcp-1c`
 
 Кэш привязан к пути, размеру и времени изменения `.hbk`, языку и версии схемы. После обновления
 платформы он пересобирается сам; `--refresh` форсирует пересборку, `--no-cache` отключает кэш.
@@ -132,7 +132,7 @@ java -jar build/libs/mcp-bsl-context.jar
 
 Индекс выгрузки — отдельная SQLite-база, файлы выгрузки не меняются:
 
-- Windows: `%LOCALAPPDATA%\mcp-bsl-context\dumps\dump-<hash>.db`
+- Windows: `%LOCALAPPDATA%\mcp-1c\dumps\dump-<hash>.db`
 - Linux/macOS: в каталоге кэша пользователя, подкаталог `dumps`
 
 Путь задаётся `--dump-index-dir` или `DUMP_INDEX_DIR`. Индекс строится при первом открытии выгрузки
@@ -142,7 +142,7 @@ java -jar build/libs/mcp-bsl-context.jar
 ## SSE
 
 ```bash
-java -jar build/libs/mcp-bsl-context.jar --mode sse --port 9000 --platform-path "/opt/1cv8/x86_64/8.3.27.2214"
+java -jar build/libs/mcp-1c.jar --mode sse --port 9000 --platform-path "/opt/1cv8/x86_64/8.3.27.2214"
 ```
 
 Подключение: `http://localhost:9000/mcp/sse`. Подробнее — [SSE_USAGE.md](SSE_USAGE.md).

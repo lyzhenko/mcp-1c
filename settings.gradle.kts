@@ -1,1 +1,1 @@
-rootProject.name = "mcp-bsl-context"
+rootProject.name = "mcp-1c"

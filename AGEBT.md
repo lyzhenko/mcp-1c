@@ -229,7 +229,7 @@
 .\gradlew.bat bootJar
 
 # запуск с выгрузкой
-java -jar build/libs/mcp-bsl-context-*.jar `
+java -jar build/libs/mcp-1c-*.jar `
   --platform-path "C:\Program Files\1cv8\8.3.27.2214" `
   --dump "C:\path\to\dump"
 ```

@@ -29,13 +29,13 @@ jobs:
         run: ./gradlew bootJar --no-daemon
 
       - name: Copy JAR to project root for Docker
-        run: cp build/libs/mcp-bsl-context-*.jar mcp-bsl-context.jar
+        run: cp build/libs/mcp-1c-*.jar mcp-1c.jar
 
       - name: Upload JAR artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mcp-bsl-context-jar
-          path: mcp-bsl-context.jar
+          name: mcp-1c-jar
+          path: mcp-1c.jar
 
   test:
     runs-on: ubuntu-latest
@@ -155,10 +155,10 @@ jobs:
       - name: Download JAR artifact
         uses: actions/download-artifact@v4
         with:
-          name: mcp-bsl-context-jar
+          name: mcp-1c-jar
 
       - name: Copy JAR to project root for Docker
-        run: cp mcp-bsl-context.jar mcp-bsl-context-test.jar
+        run: cp mcp-1c.jar mcp-1c-test.jar
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -168,7 +168,7 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           push: false
-          tags: mcp-bsl-context:test-${{ matrix.dockerfile == 'Dockerfile.sse' && 'sse' || 'stdio' }}
+          tags: mcp-1c:test-${{ matrix.dockerfile == 'Dockerfile.sse' && 'sse' || 'stdio' }}
           build-args: APP_VERSION=test
           cache-from: type=gha
           cache-to: type=gha,mode=max

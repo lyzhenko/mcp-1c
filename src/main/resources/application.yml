@@ -1,11 +1,11 @@
 spring:
   application:
-    name: mcp-bsl-context
+    name: mcp-1c
   ai:
     mcp:
       server:
         # Информация о сервере
-        name: "1C Platform API Server"
+        name: "mcp-1c"
         version: "1.0.0"
         description: "MCP-сервер со справкой по API платформы 1С:Предприятие"
         instructions: >-

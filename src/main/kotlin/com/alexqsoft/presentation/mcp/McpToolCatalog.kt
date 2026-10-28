@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 alkoleft. All rights reserved.
- * This file is part of the mcp-bsl-platform-context project.
+ * This file is part of the mcp-1c project.
  *
  * Licensed under the MIT License. See LICENSE file in the project root for full license information.
  */
@@ -12,7 +12,7 @@ package com.alexqsoft.presentation.mcp
  * что умеет текущая сборка, и не путал «инструмент не найден» с устаревшим сервером.
  */
 object McpToolCatalog {
-    const val SERVER_NAME = "mcp-bsl-context"
+    const val SERVER_NAME = "mcp-1c"
 
     val TOOLS: List<String> =
         listOf(

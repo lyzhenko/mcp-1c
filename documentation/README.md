@@ -26,14 +26,14 @@ MCP (Model Context Protocol) сервер предназначен исключ�
 
 1. **Скачайте готовый Docker образ:**
    ```bash
-   docker pull ghcr.io/alkoleft/mcp-bsl-context:v0.2.2-stdio
+   docker pull ghcr.io/lyzhenko/mcp-1c:v0.2.2-stdio
    ```
 
 2. **Запустите сервер:**
    ```bash
    docker run --rm -i \
      -v /path/to/1c/platform:/app/1c-platform:ro \
-     ghcr.io/alkoleft/mcp-bsl-context:v0.2.2-stdio \
+     ghcr.io/lyzhenko/mcp-1c:v0.2.2-stdio \
      --platform-path /app/1c-platform
    ```
 
@@ -47,9 +47,9 @@ MCP (Model Context Protocol) сервер предназначен исключ�
 
 ### Полезные ссылки
 
-- [Репозиторий проекта](https://github.com/alkoleft/mcp-bsl-context)
-- [GitHub Container Registry](https://github.com/alkoleft/mcp-bsl-context/pkgs/container/mcp-bsl-context)
-- [Релизы](https://github.com/alkoleft/mcp-bsl-context/releases)
+- [Репозиторий проекта](https://github.com/lyzhenko/mcp-1c)
+- [GitHub Container Registry](https://github.com/lyzhenko/mcp-1c/pkgs/container/mcp-1c)
+- [Релизы](https://github.com/lyzhenko/mcp-1c/releases)
 
 ---
 

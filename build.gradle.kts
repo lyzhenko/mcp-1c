@@ -12,7 +12,7 @@ plugins {
     alias(libs.plugins.ktlint)
 }
 
-group = "io.github.alkoleft"
+group = "com.alexqsoft"
 version = "0.3.2-SNAPSHOT"
 
 gitVersioning.apply {
@@ -130,8 +130,8 @@ tasks.named("startScripts") {
 publishing {
     repositories {
         maven {
-            name = "mcp-bsl-context"
-            url = uri("https://maven.pkg.github.com/alkoleft/mcp-bsl-platform-context")
+            name = "mcp-1c"
+            url = uri("https://maven.pkg.github.com/lyzhenko/mcp-1c")
             credentials {
                 username = System.getenv("GITHUB_ACTOR")
                 password = System.getenv("GITHUB_TOKEN")

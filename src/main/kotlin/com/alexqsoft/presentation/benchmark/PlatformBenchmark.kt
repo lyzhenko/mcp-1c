@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 alkoleft. All rights reserved.
- * This file is part of the mcp-bsl-platform-context project.
+ * This file is part of the mcp-1c project.
  *
  * Licensed under the MIT License. See LICENSE file in the project root for full license information.
  */
@@ -26,7 +26,7 @@ import kotlin.system.exitProcess
 /**
  * Замеры сервера на реальной платформе: разбор, кэш, поиск и размер ответов.
  *
- * Запуск: `java -jar mcp-bsl-context.jar --benchmark --platform-path <путь>`.
+ * Запуск: `java -jar mcp-1c.jar --benchmark --platform-path <путь>`.
  * Печатает JSON-отчёт; сервер MCP при этом не поднимается.
  */
 class PlatformBenchmark(

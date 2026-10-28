@@ -1,4 +1,4 @@
-# MCP-сервер для 1С: справка по платформе и разбор выгрузки конфигурации
+# mcp-1c — MCP-сервер для 1С: справка по платформе и разбор выгрузки конфигурации
 
 **MCP (Model Context Protocol) сервер** для AI-ассистентов. Две возможности в одном процессе:
 
@@ -57,7 +57,7 @@
 **bash (Linux, macOS, Git Bash):**
 
 ```bash
-jar=$(ls -t build/libs/mcp-bsl-context-*.jar | head -1)
+jar=$(ls -t build/libs/mcp-1c-*.jar | head -1)
 
 # stdio: платформа ищется в стандартных каталогах ОС
 java -Dfile.encoding=UTF-8 -jar "$jar"
@@ -75,7 +75,7 @@ java -Dfile.encoding=UTF-8 -jar "$jar" \
 **PowerShell (Windows):**
 
 ```powershell
-$jar = (Get-ChildItem build/libs/mcp-bsl-context-*.jar |
+$jar = (Get-ChildItem build/libs/mcp-1c-*.jar |
         Sort-Object LastWriteTime | Select-Object -Last 1).FullName
 
 # stdio: платформа ищется в стандартных каталогах ОС
@@ -263,8 +263,8 @@ java "-Dfile.encoding=UTF-8" -jar $jar `
 
 Разобранная модель хранится в JSON рядом с кэшем пользователя:
 
-- Windows: `%LOCALAPPDATA%\mcp-bsl-context`
-- Linux/macOS: `~/.cache/mcp-bsl-context` и `~/Library/Caches/mcp-bsl-context`
+- Windows: `%LOCALAPPDATA%\mcp-1c`
+- Linux/macOS: `~/.cache/mcp-1c` и `~/Library/Caches/mcp-1c`
 
 Кэш проверяется по пути, размеру, времени изменения `.hbk` и версии схемы; при обновлении платформы
 он пересобирается сам. Управление: `--cache-dir <путь>`, `--no-cache`, `--refresh`.
@@ -273,7 +273,7 @@ java "-Dfile.encoding=UTF-8" -jar $jar `
 
 Выгрузка разбирается в SQLite-индекс: объекты метаданных, реквизиты, табличные части, формы,
 команды, макеты, значения перечислений, модули и процедуры. Индекс лежит отдельно от выгрузки —
-`%LOCALAPPDATA%\mcp-bsl-context\dumps\dump-<hash>.db` (Linux/macOS — в каталоге кэша пользователя),
+`%LOCALAPPDATA%\mcp-1c\dumps\dump-<hash>.db` (Linux/macOS — в каталоге кэша пользователя),
 поэтому файлы выгрузки не меняются.
 
 - Первое открытие строит индекс в фоне; `status` показывает фазу и прогресс.
@@ -309,7 +309,7 @@ java "-Dfile.encoding=UTF-8" -jar $jar `
 | Поиск (90 запросов) | p50 6 мс, p95 22 мс, максимум 31 мс |
 | Размер ответа поиска | в среднем 0,8 КБ, максимум 3,5 КБ |
 
-Повторить: `java -jar mcp-bsl-context.jar --benchmark --platform-path <путь> --refresh`.
+Повторить: `java -jar mcp-1c.jar --benchmark --platform-path <путь> --refresh`.
 Отчёт — JSON в stdout, диагностика — в stderr.
 
 ## Режимы работы
@@ -329,7 +329,7 @@ java "-Dfile.encoding=UTF-8" -jar $jar `
       "args": [
         "-Dfile.encoding=UTF-8",
         "-jar",
-        "C:\\path\\mcp-bsl-context.jar",
+        "C:\\path\\mcp-1c.jar",
         "--platform-path",
         "C:\\Program Files\\1cv8\\8.3.27.2214"
       ]
@@ -341,7 +341,7 @@ java "-Dfile.encoding=UTF-8" -jar $jar `
 ### SSE
 
 ```bash
-java -jar mcp-bsl-context.jar --mode sse --port 8080 --platform-path "/opt/1cv8/x86_64/8.3.27.2214"
+java -jar mcp-1c.jar --mode sse --port 8080 --platform-path "/opt/1cv8/x86_64/8.3.27.2214"
 ```
 
 Подробнее — [SSE_USAGE.md](documentation/SSE_USAGE.md).
@@ -388,8 +388,8 @@ java -jar mcp-bsl-context.jar --mode sse --port 8080 --platform-path "/opt/1cv8/
 ## Docker
 
 ```bash
-docker build -f Dockerfile.stdio -t mcp-bsl-context .
-docker run --rm -i -v "/path/to/1cv8:/app/1c-platform" mcp-bsl-context
+docker build -f Dockerfile.stdio -t mcp-1c .
+docker run --rm -i -v "/path/to/1cv8:/app/1c-platform" mcp-1c
 ```
 
 SSE-вариант: [Dockerfile.sse](Dockerfile.sse) и [documentation/03_DOCKER.md](documentation/03_DOCKER.md).

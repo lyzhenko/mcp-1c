@@ -28,7 +28,7 @@ MCP сервер поддерживает два режима работы:
       "command": "java",
       "args": [
         "-jar", 
-        "/path/to/mcp-bsl-context.jar", 
+        "/path/to/mcp-1c.jar", 
         "--platform-path", 
         "/opt/1cv8/x86_64/8.3.25.1257"
       ]
@@ -46,7 +46,7 @@ MCP сервер поддерживает два режима работы:
       "command": "java",
       "args": [
         "-jar", 
-        "C:\\ваш\\путь\\mcp-bsl-context.jar", 
+        "C:\\ваш\\путь\\mcp-1c.jar", 
         "--platform-path", 
         "C:\\Progra~1\\1cv8\\8.3.23.1912\\bin"
       ]
@@ -63,7 +63,7 @@ MCP сервер поддерживает два режима работы:
       "command": "java",
       "args": [
         "-jar", 
-        "C:\\ваш\\путь\\mcp-bsl-context.jar"
+        "C:\\ваш\\путь\\mcp-1c.jar"
       ],
       "env": {
         "PLATFORM_CONTEXT_PATH": "C:\\Program Files\\1cv8\\8.3.21.1644\\bin"
@@ -89,7 +89,7 @@ Cursor поддерживает MCP серверы через конфигура
       "command": "java",
       "args": [
         "-jar", 
-        "/path/to/mcp-bsl-context.jar", 
+        "/path/to/mcp-1c.jar", 
         "--platform-path", 
         "/opt/1cv8/x86_64/8.3.25.1257"
       ]
@@ -107,7 +107,7 @@ Cursor поддерживает MCP серверы через конфигура
       "command": "java",
       "args": [
         "-jar", 
-        "C:\\ваш\\путь\\mcp-bsl-context.jar", 
+        "C:\\ваш\\путь\\mcp-1c.jar", 
         "--platform-path", 
         "C:\\Progra~1\\1cv8\\8.3.23.1912\\bin"
       ]
@@ -180,7 +180,7 @@ Cursor автоматически использует MCP инструмент�
 
 ```bash
 # Запуск SSE сервера
-java -jar mcp-bsl-context.jar --mode sse --platform-path "/path/to/1c/platform" --port 8080
+java -jar mcp-1c.jar --mode sse --platform-path "/path/to/1c/platform" --port 8080
 ```
 
 ### Подключение через URL
@@ -219,7 +219,7 @@ java -jar mcp-bsl-context.jar --mode sse --platform-path "/path/to/1c/platform" 
       "args": [
         "run", "--rm", "-i",
         "-v", "/opt/1cv8/x86_64/8.3.25.1257:/app/1c-platform:ro",
-        "ghcr.io/alkoleft/mcp-bsl-context:v0.2.1-stdio",
+        "ghcr.io/lyzhenko/mcp-1c:v0.2.1-stdio",
         "--platform-path", "/app/1c-platform"
       ]
     }

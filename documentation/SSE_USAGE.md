@@ -17,13 +17,13 @@ SSE (Server-Sent Events) режим позволяет запускать MCP с
 
 ```bash
 # Базовый запуск
-java -jar mcp-bsl-context.jar --mode sse --platform-path "/path/to/1c/platform"
+java -jar mcp-1c.jar --mode sse --platform-path "/path/to/1c/platform"
 
 # С кастомным портом
-java -jar mcp-bsl-context.jar --mode sse --port 9000 --platform-path "/path/to/1c/platform"
+java -jar mcp-1c.jar --mode sse --port 9000 --platform-path "/path/to/1c/platform"
 
 # С отладочным логированием
-java -jar mcp-bsl-context.jar --mode sse --verbose --platform-path "/path/to/1c/platform"
+java -jar mcp-1c.jar --mode sse --verbose --platform-path "/path/to/1c/platform"
 ```
 
 ### Переменные окружения
@@ -32,7 +32,7 @@ java -jar mcp-bsl-context.jar --mode sse --verbose --platform-path "/path/to/1c/
 # Настройка через переменные окружения
 export PLATFORM_CONTEXT_PATH="/path/to/1c/platform"
 export SSE_PORT=8080
-java -jar mcp-bsl-context.jar --mode sse
+java -jar mcp-1c.jar --mode sse
 ```
 
 ## Docker
@@ -41,13 +41,13 @@ java -jar mcp-bsl-context.jar --mode sse
 
 ```bash
 # Сборка образа
-docker build -t mcp-bsl-context-sse -f Dockerfile.sse .
+docker build -t mcp-1c-sse -f Dockerfile.sse .
 
 # Запуск контейнера
 docker run -d \
   -v /path/to/1c/platform:/app/1c-platform:ro \
   -p 8080:8080 \
-  mcp-bsl-context-sse
+  mcp-1c-sse
 ```
 
 ### Docker Compose
@@ -113,7 +113,7 @@ grep "SSE connection" mcp-server.log
 
 1. **Увеличьте heap size JVM:**
    ```bash
-   java -Xmx2g -jar mcp-bsl-context.jar --mode sse
+   java -Xmx2g -jar mcp-1c.jar --mode sse
    ```
 
 2. **Проверьте загрузку CPU и памяти**
@@ -128,7 +128,7 @@ grep "SSE connection" mcp-server.log
 java -Xms1g -Xmx4g \
   -XX:+UseG1GC \
   -XX:MaxGCPauseMillis=200 \
-  -jar mcp-bsl-context.jar \
+  -jar mcp-1c.jar \
   --mode sse \
   --platform-path "/path/to/1c/platform"
 ```

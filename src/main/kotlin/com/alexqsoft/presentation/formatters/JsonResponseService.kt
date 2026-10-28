@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 alkoleft. All rights reserved.
- * This file is part of the mcp-bsl-platform-context project.
+ * This file is part of the mcp-1c project.
  *
  * Licensed under the MIT License. See LICENSE file in the project root for full license information.
  */
@@ -136,7 +136,7 @@ class JsonResponseService(
                 "state" to status.state,
                 "server" to
                     linkedMapOf<String, Any?>(
-                        "name" to "mcp-bsl-context",
+                        "name" to "mcp-1c",
                         "version" to serverVersion,
                         "tools" to tools,
                     ),

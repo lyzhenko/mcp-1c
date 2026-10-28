@@ -46,7 +46,7 @@ MCP-сервер отдаёт AI-ассистенту две вещи:
 
 ```bash
 ./gradlew clean bootJar
-jar=$(ls -t build/libs/mcp-bsl-context-*.jar | head -1)
+jar=$(ls -t build/libs/mcp-1c-*.jar | head -1)
 java -Dfile.encoding=UTF-8 -jar "$jar" \
   --platform-path "/path/to/1cv8/8.3.27.2214" \
   --dump "/path/to/dump"
@@ -55,7 +55,7 @@ java -Dfile.encoding=UTF-8 -jar "$jar" \
 В PowerShell те же ключи, но `-D...` в кавычках и продолжение строки — обратный апостроф:
 
 ```powershell
-$jar = (Get-ChildItem build/libs/mcp-bsl-context-*.jar |
+$jar = (Get-ChildItem build/libs/mcp-1c-*.jar |
         Sort-Object LastWriteTime | Select-Object -Last 1).FullName
 java "-Dfile.encoding=UTF-8" -jar $jar `
   --platform-path "C:\Program Files\1cv8\8.3.27.2214" `

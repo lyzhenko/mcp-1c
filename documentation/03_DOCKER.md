@@ -2,7 +2,7 @@
 
 ## Запуск в Docker c STDIO
 
-- В папке с `Dockerfile'ом` рядом должен быть JAR-файл (например, `mcp-bsl-context-0.2.2.jar`).
+- В папке с `Dockerfile'ом` рядом должен быть JAR-файл (например, `mcp-1c-0.2.2.jar`).
 - Собираем docker image:
 
 ```bash
@@ -80,18 +80,18 @@ docker run -d \
 }
 ```
 
-Актуальную версию (APP_VERSION) смотрите в [релизах](https://github.com/alkoleft/mcp-bsl-context/releases)
+Актуальную версию (APP_VERSION) смотрите в [релизах](https://github.com/lyzhenko/mcp-1c/releases)
 
 ## Быстрый старт с опубликованными Docker-образами
 
-Сервер MCP теперь доступен как готовый Docker-образ на GitHub Container Registry: [ghcr.io/alkoleft/mcp-bsl-context](https://github.com/alkoleft/mcp-bsl-context/pkgs/container/mcp-bsl-context)
+Сервер MCP теперь доступен как готовый Docker-образ на GitHub Container Registry: [ghcr.io/lyzhenko/mcp-1c](https://github.com/lyzhenko/mcp-1c/pkgs/container/mcp-1c)
 
 ### Получение образа
 
 ```bash
-docker pull ghcr.io/alkoleft/mcp-bsl-context:v0.2.2-sse
+docker pull ghcr.io/lyzhenko/mcp-1c:v0.2.2-sse
 # или для stdio:
-docker pull ghcr.io/alkoleft/mcp-bsl-context:v0.2.2-stdio
+docker pull ghcr.io/lyzhenko/mcp-1c:v0.2.2-stdio
 ```
 
 ### Запуск STDIO-версии
@@ -99,7 +99,7 @@ docker pull ghcr.io/alkoleft/mcp-bsl-context:v0.2.2-stdio
 ```bash
 docker run --rm -i \
   -v /path/to/1c/platform:/app/1c-platform:ro \
-  ghcr.io/alkoleft/mcp-bsl-context:v0.2.2-stdio \
+  ghcr.io/lyzhenko/mcp-1c:v0.2.2-stdio \
   --platform-path /app/1c-platform
 ```
 
@@ -109,12 +109,12 @@ docker run --rm -i \
 docker run -d \
   -v /path/to/1c/platform:/app/1c-platform:ro \
   -p 8001:8000 \
-  ghcr.io/alkoleft/mcp-bsl-context:v0.2.2-sse \
+  ghcr.io/lyzhenko/mcp-1c:v0.2.2-sse \
   --platform-path /app/1c-platform
 ```
 
 - Замените `/path/to/1c/platform` на путь к вашей установленной платформе 1С (только для чтения).
-- Для актуальных тегов и digest-версий смотрите [страницу пакета](https://github.com/alkoleft/mcp-bsl-context/pkgs/container/mcp-bsl-context).
+- Для актуальных тегов и digest-версий смотрите [страницу пакета](https://github.com/lyzhenko/mcp-1c/pkgs/container/mcp-1c).
 
 ### Интеграция с IDE
 

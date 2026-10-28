@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 alkoleft. All rights reserved.
- * This file is part of the mcp-bsl-platform-context project.
+ * This file is part of the mcp-1c project.
  *
  * Licensed under the MIT License. See LICENSE file in the project root for full license information.
  */
@@ -69,10 +69,10 @@ data class ServerOptions(
     companion object {
         val USAGE =
             """
-            mcp-bsl-context — MCP-сервер: справка по API платформы 1С и разбор выгрузки конфигурации.
+            mcp-1c — MCP-сервер: справка по API платформы 1С и разбор выгрузки конфигурации.
 
             Использование:
-              java -jar mcp-bsl-context.jar [--platform-path <путь>] [--dump <путь>] [ключи]
+              java -jar mcp-1c.jar [--platform-path <путь>] [--dump <путь>] [ключи]
 
             Платформа:
               -p, --platform-path <путь>  каталог установки 1С, каталог версии или файл shcntx_*.hbk;

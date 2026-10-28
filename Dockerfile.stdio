@@ -4,13 +4,13 @@ FROM eclipse-temurin:21-jre-jammy
 ARG APP_VERSION=0.2.2
 
 WORKDIR /app
-COPY mcp-bsl-context-${APP_VERSION}.jar /app/mcp-bsl-context.jar
+COPY mcp-1c-${APP_VERSION}.jar /app/mcp-1c.jar
 
 # ENTRYPOINT чтобы STDIO сразу уходил наружу
-ENTRYPOINT ["java","-jar","/app/mcp-bsl-context.jar"]
+ENTRYPOINT ["java","-jar","/app/mcp-1c.jar"]
 
 # Дополнительные аргументы (например --platform-path)
 # получим из docker run, поэтому CMD не задаём
 
 # Run the application in SSE mode
-CMD ["java", "-jar", "/app/mcp-bsl-context.jar", "--mode", "stdio", "--platform-path", "/app/1c-platform"]
+CMD ["java", "-jar", "/app/mcp-1c.jar", "--mode", "stdio", "--platform-path", "/app/1c-platform"]
