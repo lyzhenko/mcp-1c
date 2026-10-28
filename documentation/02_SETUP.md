@@ -2,7 +2,7 @@
 
 ## Требования
 
-- Java 17+.
+- Java 21+.
 - Установленная платформа 1С:Предприятие 8.3 (нужен `bin/shcntx_ru.hbk`; для английской справки —
   `shcntx_en.hbk`, если она есть в установке).
 
@@ -183,6 +183,6 @@ java -jar build/libs/mcp-bsl-context.jar --mode sse --port 9000 --platform-path 
 ## Совместимость
 
 - MCP-протокол: 2024-11-05 (Spring AI MCP Server 1.0.0).
-- Java 17+.
+- Java 21+.
 - ОС: Windows, Linux, macOS (пути поиска платформы различаются).
 - Транспорты: stdio, HTTP/SSE.

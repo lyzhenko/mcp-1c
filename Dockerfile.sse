@@ -1,5 +1,5 @@
 # Работает и на Intel, и на Apple Silicon
-FROM eclipse-temurin:17-jre-jammy
+FROM eclipse-temurin:21-jre-jammy
 
 ARG APP_VERSION=0.2.2
 

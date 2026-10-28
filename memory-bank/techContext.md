@@ -2,7 +2,7 @@
 
 ## Стек
 
-- **Язык:** Kotlin 2.1.20, Java 17.
+- **Язык:** Kotlin 2.1.20, Java 21.
 - **Фреймворк:** Spring Boot 3.5.3.
 - **MCP:** Spring AI MCP Server 1.0.0 (stdio и SSE).
 - **JSON:** Jackson 2.15.2 + Kotlin Module.

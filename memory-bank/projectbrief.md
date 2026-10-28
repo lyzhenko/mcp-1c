@@ -27,7 +27,7 @@ MCP-сервер (Model Context Protocol) для 1С:Предприятие. Д�
 
 ## Архитектура
 
-- Kotlin 2.1, Java 17, Spring Boot 3.5, Spring AI MCP Server 1.0, Jackson, Logback, sqlite-jdbc.
+- Kotlin 2.1, Java 21, Spring Boot 3.5, Spring AI MCP Server 1.0, Jackson, Logback, sqlite-jdbc.
 - Слои: `presentation` (MCP, JSON, CLI, benchmark) → `business` (домен и сервисы) →
   `infrastructure` (hbk-парсер, локатор, кэш, каталог; dump-парсер и SQLite-индекс).
 - Модель платформы неизменяемая (`PlatformContextData`), публикуется после фоновой загрузки.
