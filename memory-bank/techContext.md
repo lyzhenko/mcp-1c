@@ -1,145 +1,107 @@
 # Технический контекст mcp-bsl-context
 
-## Технологический стек
-- **Язык:** Kotlin 1.9.22 + Java 17
-- **Фреймворк:** Spring Boot 3.5.0
-- **Сборка:** Gradle 8.x + Kotlin DSL
-- **MCP Server:** Spring AI MCP Server 1.0.0
-- **Сериализация:** Jackson 2.15.2 + Kotlin Module
-- **Логирование:** Logback 1.5.18 + SLF4J
-- **Асинхронность:** Kotlin Coroutines
-- **Concurrency:** ConcurrentHashMap + Kotlin thread-safe extensions
-- **Тестирование:** JUnit 5 + AssertJ + Spring Boot Test
+## Стек
 
-## Принципы разработки
+- **Язык:** Kotlin 2.1.20, Java 17.
+- **Фреймворк:** Spring Boot 3.5.3.
+- **MCP:** Spring AI MCP Server 1.0.0 (stdio и SSE).
+- **JSON:** Jackson 2.15.2 + Kotlin Module.
+- **Хранилище выгрузки:** SQLite через sqlite-jdbc.
+- **Логирование:** Logback 1.5.18 + SLF4J.
+- **Тесты:** JUnit 5, kotlin.test, AssertJ.
+- **Сборка:** Gradle 8, Kotlin DSL, ktlint, jacoco, git-versioning.
 
-### SOLID принципы (ОБЯЗАТЕЛЬНО)
-- **S** - Single Responsibility Principle: каждый класс отвечает за одну задач
-- **O** - Open/Closed Principle: открыт для расширения, закрыт для изменения
-- **L** - Liskov Substitution Principle: подклассы должны заменять базовые классы
-- **I** - Interface Segregation Principle: интерфейсы должны быть специфичными
-- **D** - Dependency Inversion Principle: зависимость от абстракций, не от конкретики
+## Слои
 
-### Kotlin best practices (ОБЯЗАТЕЛЬНО)
-- **Data classes** - для DTO объектов вместо POJO
-- **Extension functions** - для дополнительной функциональности
-- **Coroutines** - для асинхронных операций вместо Thread/CompletableFuture
-- **Companion objects** - для статических методов и констант
-- **When expressions** - для pattern matching вместо if-else chains
-- **Null safety** - строгая типизация с nullable/non-nullable типами
-- **Sealed classes** - для type-safe иерархий
-- **Type aliases** - для упрощения сложных типов
-
-### Тестирование (ОБЯЗАТЕЛЬНО)
-- **Покрытие:** минимум 80% unit тестов для бизнес-логики
-- **Интеграционные тесты:** для всех MCP tools и Spring сервисов
-- **Naming convention:** `should return expected result when given valid input()`
-- **AAA pattern:** Arrange, Act, Assert
-- **Обязательные тесты для:**
-  - Всех публичных методов сервисов
-  - Всех MCP tools (`@Tool` методов)
-  - Kotlin DSL функциональности
-  - Thread-safe операций
-
-### Документирование (ОБЯЗАТЕЛЬНО)
-- **KDoc:** для всех публичных классов и методов
-- **README.md:** актуальная документация по использованию MCP сервера
-- **MCP_SERVER_USAGE.md:** подробное руководство по настройке и использованию
-- **Memory Bank:** структурированная документация проекта
-- **Примеры использования:** для интеграции с AI клиентами
-
-## Архитектурные решения
-
-### MCP-only архитектура (Pure Kotlin)
-- **McpServerApplication** - Spring Boot точка входа
-- **PlatformApiSearchService** - основной MCP сервис с `@Tool` методами
-- **PlatformContextService** - thread-safe управление контекстом платформы
-- **MarkdownFormatterService** - форматирование результатов для AI
-- **PlatformContextLoader** - асинхронная загрузка данных платформы
-
-### Kotlin Data Classes для DTO
-- **Data classes** вместо Java records/POJO
-- **ApiType.kt** - типы API элементов
-- **SearchQuery.kt** - параметры поисковых запросов
-- **PlatformTypeDefinition.kt** - определение типа платформы
-- **MethodDefinition.kt** - определение метода
-- **PropertyDefinition.kt** - определение свойства
-- **ParameterDefinition.kt** - определение параметра
-- **Signature.kt** - сигнатура метода
-
-### MCP Tools (Spring AI Integration)
-- **search(query, type, limit)** - нечеткий поиск по API
-- **info(name, type)** - детальная информация об элементе
-- **getMember(typeName, memberName)** - информация об элементе типа
-- **getMembers(typeName)** - все элементы типа
-- **getConstructors(typeName)** - конструкторы типа
-
-### Интеллектуальный поиск с приоритизацией
-- **4-уровневая система приоритизации:** точное → префиксное → частичное → fuzzy
-- **Составные запросы:** "Таблица значений" → "ТаблицаЗначений"
-- **Тип+элемент запросы:** поиск методов и свойств конкретного типа
-- **Русскоязычные алиасы:** 13 терминов для интуитивного поиска
-- **Кэширование:** Spring Cache для оптимизации производительности
-
-### Thread-Safe Concurrency (Kotlin)
-- **ConcurrentHashMap** для индексов поиска
-- **Kotlin Coroutines** для асинхронных операций
-- **withLock extensions** для критических секций
-- **Thread-safe initialization** через lazy delegates
-
-## Интеграция с BSL Context
-- Зависимость от модуля `bsl-context` (1c-syntax)
-- Парсинг файлов платформы 1С (*.hbk)
-- Загрузка API информации при старте приложения
-
-## MCP Server интеграция
-- **Spring AI MCP Server** для поддержки Model Context Protocol
-- **JSON-RPC 2.0** протокол для коммуникации с AI клиентами
-- **STDIO transport** для интеграции с Claude Desktop/Cursor IDE
-- **Автоматическая регистрация** `@Tool` методов
-
-## Файловая структура (Kotlin)
 ```
-src/main/kotlin/ru/alkoleft/context/platform/
-├── McpServerApplication.kt     # Spring Boot точка входа
-├── mcp/                        # MCP сервисы
-│   ├── PlatformApiSearchService.kt
-│   ├── PlatformContextService.kt
-│   ├── MarkdownFormatterService.kt
-│   └── PlatformContextLoader.kt
-├── dto/                        # Kotlin Data Classes
-│   ├── ApiType.kt
-│   ├── SearchQuery.kt
-│   ├── PlatformTypeDefinition.kt
-│   └── ...
-├── search/                     # Поисковая подсистема
-│   ├── KotlinSearchService.kt
-│   └── SearchDsl.kt
-└── exporter/                   # Legacy экспортеры (совместимость)
-    └── BaseExporterLogic.kt
+presentation/   PlatformContextMcpController, DumpMcpController (@Tool), JsonResponseService,
+                DumpJsonService, ServerOptions, PlatformBenchmark
+business/       Definition/Method/Property/Type/Enum; ContextSearchService; DumpService;
+                PlatformStatusService; страницы
+infrastructure/ hbk-парсер, PlatformLocator, PlatformCache, PlatformContextLoader/Storage,
+                PlatformCatalog; dump-парсер, DumpIndexer/Index/Storage
 ```
+
+Зависимости направлены внутрь: presentation знает business и инфраструктурные типы конфигурации,
+business работает с неизменяемой моделью, infrastructure отвечает за файлы и разбор.
+
+## Ключевые решения
+
+### Модель платформы
+
+`PlatformContextData` — неизменяемый снимок: глобальные методы и свойства, типы с методами,
+свойствами и конструкторами, перечисления со значениями, метаданные источника. Собирается один раз
+и публикуется через volatile-ссылку; чтение без блокировок.
+
+### Загрузка
+
+`PlatformContextStorage` стартует разбор в фоновом потоке из `@PostConstruct` (в stdio-режиме
+MCP-сервер занимает основной поток раньше `ApplicationRunner`). Состояния `idle → loading → ready|failed`.
+Инструменты ждут готовности не дольше `platform.wait-timeout-ms`; `status` не ждёт никогда.
+
+### Кэш
+
+`PlatformCache` хранит JSON в каталоге пользователя; ключ — путь, размер, время изменения `.hbk`,
+язык и версия схемы. Запись атомарная. Схема поднимается при изменении модели или правил разбора.
+
+### Поиск
+
+`PlatformCatalog` строится один раз на модель и ранжирует линейным проходом: точное имя →
+префикс → вхождение → английское имя → описание → все слова. Отдельно разрешается «Тип.Член».
+Подсказки — по вхождению и расстоянию Левенштейна (≤ 2), плюс типы-владельцы членов.
+
+### Ответы
+
+`JsonResponseService` собирает JSON вручную (Jackson), ограничивает размер (`response-limit`,
+по умолчанию 24 000), отдаёт `nextOffset`/`hasMore` и сокращает длинные строки с `truncated`.
+`RawJsonResultConverter` отключает повторную сериализацию строки в Spring AI.
+
+### Выгрузка конфигурации
+
+`DumpIndexer` читает объектные `*.xml` и все `.bsl`, строит SQLite-индекс
+(`DumpIndex.SCHEMA_VERSION` = 2) во временном файле и подменяет готовый. Владелец модуля
+определяется по каталогу объекта, вид — по суффиксу пути. `BslModuleScanner` находит процедуры,
+экспорт и границы; `DumpTextReader` снимает BOM, откатывается на windows-1251 и нормализует
+переводы строк. `DumpStorage` открывает готовый индекс по пути и схеме или строит в фоне.
+`dumpGrep` берёт список модулей из индекса, а не обходит 65 000 файлов.
+
+## Инструменты
+
+- `search(query, type?, limit?, offset?)`
+- `info(name, type?)`
+- `getMember(typeName, memberName)`
+- `getMembers(typeName, limit?, offset?)`
+- `getConstructors(typeName, limit?, offset?)`
+- `dumpOpen(path)`
+- `dumpSearch(query, kind?, limit?, offset?)`
+- `dumpMetadata(ref, limit?)`
+- `dumpCode(path?, id?, from?, to?)`
+- `dumpGrep(pattern, regex?, ignoreCase?, extensions?, paths?, context?, limit?, deadlineMs?)`
+- `dumpReload()`
+- `status()`
+
+Все возвращают JSON; ошибки — `error.code` + `suggestions`/`memberOwners`.
 
 ## Конфигурация
-- **application.yml** - Spring Boot конфигурация
-- **logback.xml** - логирование для development
-- **logback-mcp.xml** - специальная конфигурация для MCP режима
-- **gradle/wrapper** - управление версиями Gradle
 
-## Система сборки (Kotlin DSL)
-- **Gradle** с Kotlin DSL вместо Groovy
-- **Git версионирование** через qoomon plugin
-- **Spring Boot fat JAR** через bootJar task
-- **GitHub Packages** для публикации артефактов
-- **Kotlin compiler options** с JSR-305 strict mode
+- `application.yml` — Spring, `platform.context.*` и `dump.*`.
+- `logback-mcp.xml` — логи только в файл, stdout свободен для протокола.
+- CLI (`ServerOptions`) переопределяет настройки через системные свойства.
 
-## Интеграция с AI клиентами
-- **Claude Desktop** - через claude_desktop_config.json
-- **Cursor IDE** - через .cursor/mcp.json
-- **MCP протокол** - стандартизированный доступ к API
-- **Markdown форматирование** - оптимизировано для AI понимания
+## Тестирование
 
-## Development процесс
-- **Memory Bank workflow** - структурированная разработка
-- **Level-based complexity** - от Level 1 до Level 4 задач
-- **Mode transitions** - VAN → PLAN → CREATIVE → IMPLEMENT → QA → REFLECT → ARCHIVE
-- **Continuous documentation** - актуализация документации на каждом этапе 
+- Юнит-тесты: маппинг hbk → домен, каталог и ранжирование, кэш, локатор платформ, JSON-страницы,
+  разбор CLI.
+- Выгрузка: синтетический дамп в `src/test/resources/dump` — индекс, поиск, карточка, код, grep,
+  переиспользование индекса.
+- Интеграционные: `@SpringBootTest` на реальной справке установленной платформы (нужен
+  `-PPLATFORM_PATH`), проверяют JSON-контракт, сигнатуры, параметры и конструкторы.
+- Всего 107 тестов; в CI дополнительно ktlint и jacoco.
+
+## Ограничения
+
+- Разбирается только `shcntx_*.hbk`; язык запросов и описание встроенного языка не индексируются.
+- Модель и индекс — снимки; после обновления платформы нужен перезапуск, после правок выгрузки —
+  `dumpReload`.
+- Графа вызовов и проверки BSL-кода пока нет.
+- Разбор BSL-кода и выгрузки конфигурации не входит в задачи сервера.

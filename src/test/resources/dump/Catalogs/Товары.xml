@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<Catalog uuid="00000000-0000-0000-0000-000000000101">
+		<Properties>
+			<Name>Товары</Name>
+			<Synonym>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Товары</v8:content>
+				</v8:item>
+			</Synonym>
+			<Comment>Справочник товаров</Comment>
+		</Properties>
+		<ChildObjects>
+			<Attribute uuid="00000000-0000-0000-0000-000000000102">
+				<Properties>
+					<Name>Артикул</Name>
+					<Synonym>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Артикул</v8:content>
+						</v8:item>
+					</Synonym>
+					<Type>
+						<v8:Type>xs:string</v8:Type>
+					</Type>
+				</Properties>
+			</Attribute>
+			<TabularSection uuid="00000000-0000-0000-0000-000000000103">
+				<Properties>
+					<Name>Строки</Name>
+					<Synonym>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Строки товаров</v8:content>
+						</v8:item>
+					</Synonym>
+				</Properties>
+				<ChildObjects>
+					<Attribute uuid="00000000-0000-0000-0000-000000000104">
+						<Properties>
+							<Name>Товар</Name>
+							<Type>
+								<v8:Type>cfg:CatalogRef.Товары</v8:Type>
+							</Type>
+						</Properties>
+					</Attribute>
+				</ChildObjects>
+			</TabularSection>
+			<Form uuid="00000000-0000-0000-0000-000000000105">
+				<Properties>
+					<Name>ФормаЭлемента</Name>
+				</Properties>
+			</Form>
+			<Command uuid="00000000-0000-0000-0000-000000000106">
+				<Properties>
+					<Name>Заполнить</Name>
+				</Properties>
+			</Command>
+		</ChildObjects>
+	</Catalog>
+</MetaDataObject>

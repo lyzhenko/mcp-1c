@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 alkoleft. All rights reserved.
- * This file is part of the mcp-bsl-context project.
+ * This file is part of the mcp-bsl-platform-context project.
  *
  * Licensed under the MIT License. See LICENSE file in the project root for full license information.
  */
@@ -8,65 +8,139 @@
 package ru.alkoleft.context.infrastructure.persistent.storage
 
 import io.github.oshai.kotlinlogging.KotlinLogging
-import ru.alkoleft.context.business.entities.MethodDefinition
-import ru.alkoleft.context.business.entities.PlatformTypeDefinition
-import ru.alkoleft.context.business.entities.PropertyDefinition
-import ru.alkoleft.context.infrastructure.hbk.models.MethodInfo
-import ru.alkoleft.context.infrastructure.hbk.models.PropertyInfo
-import java.nio.file.Path
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.locks.ReentrantReadWriteLock
-import kotlin.concurrent.read
-import kotlin.concurrent.write
+import jakarta.annotation.PostConstruct
+import ru.alkoleft.context.infrastructure.platform.PlatformOptions
 
 private val logger = KotlinLogging.logger {}
 
+/**
+ * Состояние модели платформы на текущий момент.
+ *
+ * @property elapsedMs сколько уже длится разбор (или сколько длился в прошлый раз)
+ */
+data class PlatformContextSnapshot(
+    val state: PlatformContextStorage.State,
+    val result: PlatformLoadResult?,
+    val error: String?,
+    val startedAt: Long,
+    val elapsedMs: Long,
+)
+
+/**
+ * Хранилище модели платформы с фоновой загрузкой.
+ *
+ * Разбор `.hbk` — самая долгая операция сервера, поэтому он идёт в отдельном потоке:
+ * `status` отвечает сразу, а инструменты ждут готовности не дольше [PlatformOptions.waitTimeoutMs]
+ * и, если не дождались, честно отвечают «загружается», вместо того чтобы держать вызов минутами.
+ * Загруженная модель неизменяема и публикуется через volatile-ссылку — блокировок на чтении нет.
+ */
 class PlatformContextStorage(
     private val loader: PlatformContextLoader,
-    val platformPath: Path,
+    private val options: PlatformOptions,
 ) {
-    var methods: List<MethodDefinition> = emptyList()
-    var properties: List<PropertyDefinition> = emptyList()
-    var types: List<PlatformTypeDefinition> = emptyList()
-    private val indexInitialized = AtomicBoolean(false)
-    private val lock = ReentrantReadWriteLock()
+    enum class State {
+        IDLE,
+        LOADING,
+        READY,
+        FAILED,
+    }
 
-    fun load() {
-        logger.debug { "Вызвана загрузка платформенного контекста" }
-        // Быстрая проверка с read lock
-        lock.read {
-            if (indexInitialized.get()) {
-                logger.debug { "Контекст уже инициализирован (read lock)" }
-                return
-            }
-        }
+    private val monitor = Object()
 
-        // Инициализация с write lock
-        return lock.write {
-            // Двойная проверка в write lock
-            if (indexInitialized.get()) {
-                logger.debug { "Контекст уже инициализирован (write lock)" }
-                return
-            } else {
-                logger.info { "Инициализация платформенного контекста..." }
-                loadPlatformContext()
-                logger.info { "Платформенный контекст успешно инициализирован" }
-            }
+    @Volatile
+    private var state: State = State.IDLE
+
+    @Volatile
+    private var result: PlatformLoadResult? = null
+
+    @Volatile
+    private var failure: String? = null
+
+    @Volatile
+    private var startedAt: Long = 0
+
+    /**
+     * Разбор стартует при создании бина, а не по ApplicationRunner: MCP-сервер в stdio-режиме
+     * занимает основной поток ещё до запуска runner'ов, и статус успевал показать `idle`.
+     */
+    @PostConstruct
+    fun startWarmup() {
+        if (options.warmup) warmup()
+    }
+
+    /** Начать разбор, если он ещё не начат. */
+    fun warmup() {
+        synchronized(monitor) {
+            if (state != State.IDLE) return
+            state = State.LOADING
+            startedAt = System.currentTimeMillis()
+            val thread =
+                Thread({ runLoad() }, "platform-context-loader").apply {
+                    isDaemon = true
+                    start()
+                }
+            logger.info { "Разбор справки платформы запущен в фоне (поток ${thread.name})" }
         }
     }
 
-    private fun loadPlatformContext() {
-        if (indexInitialized.get()) {
-            logger.debug { "Контекст уже инициализирован (loadPlatformContext)" }
-            return
+    /**
+     * Дождаться готовности модели.
+     *
+     * @return результат или null, если разбор ещё идёт либо завершился ошибкой
+     */
+    fun awaitReady(): PlatformLoadResult? {
+        warmup()
+        synchronized(monitor) {
+            val deadline = System.currentTimeMillis() + options.waitTimeoutMs
+            while (state == State.LOADING) {
+                val left = deadline - System.currentTimeMillis()
+                if (left <= 0) break
+                try {
+                    monitor.wait(left)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
+            }
+            return if (state == State.READY) result else null
         }
-        logger.info { "Загрузка платформенного контекста..." }
-        loader.loadPlatformContext(platformPath) {
-            methods = globalMethods().map(MethodInfo::toEntity).toList()
-            properties = globalProperties().map(PropertyInfo::toEntity).toList()
-            types = types().map { it.toEntity() }.toList()
+    }
+
+    /** Текущее состояние без ожидания. */
+    fun snapshot(): PlatformContextSnapshot =
+        synchronized(monitor) {
+            val elapsed =
+                when (state) {
+                    State.LOADING -> System.currentTimeMillis() - startedAt
+                    State.READY -> result?.loadMillis ?: 0
+                    else -> 0
+                }
+            PlatformContextSnapshot(state, result, failure, startedAt, elapsed)
         }
-        logger.info { "Загружено: методы=${methods.size}, свойства=${properties.size}, типы=${types.size}" }
-        indexInitialized.set(true)
+
+    fun options(): PlatformOptions = options
+
+    private fun runLoad() {
+        try {
+            val loaded = loader.load(options)
+            synchronized(monitor) {
+                result = loaded
+                state = State.READY
+                monitor.notifyAll()
+            }
+            val data = loaded.data
+            logger.info {
+                "Модель платформы готова: ${data.types.size} типов, ${data.methods.size} методов, " +
+                    "${data.properties.size} свойств, ${data.enums.size} перечислений" +
+                    if (loaded.fromCache) " (из кэша)" else ""
+            }
+        } catch (error: Throwable) {
+            logger.error(error) { "Разбор справки платформы завершился ошибкой" }
+            synchronized(monitor) {
+                failure = error.message ?: error.toString()
+                state = State.FAILED
+                monitor.notifyAll()
+            }
+        }
     }
 }

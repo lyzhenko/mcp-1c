@@ -8,7 +8,6 @@
 package ru.alkoleft.context.infrastructure.hbk.parsers.specialized
 
 import ru.alkoleft.context.infrastructure.hbk.exceptions.HandlerProcessingNotImplemented
-import ru.alkoleft.context.infrastructure.hbk.exceptions.UnknownPageBlockType
 import ru.alkoleft.context.infrastructure.hbk.models.EnumInfo
 import ru.alkoleft.context.infrastructure.hbk.models.RelatedObject
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.BlockHandler
@@ -18,6 +17,7 @@ import ru.alkoleft.context.infrastructure.hbk.parsers.core.NameBlockHandler
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.PageParser
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.PageProxyHandler
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.RelatedObjectsBlockHandler
+import ru.alkoleft.context.infrastructure.hbk.parsers.core.UnknownBlocks
 
 /**
  * Обработчик для парсинга страниц перечислений платформы 1С:Предприятие.
@@ -60,7 +60,9 @@ class EnumPageParseHandler : PageProxyHandler<EnumInfo>() {
             "См. также:" -> RelatedObjectsBlockHandler()
             "Пример:" -> ExampleBlockHandler() // Placeholder, can be a specific handler
             "Значения", "Доступность:", "Использование в версии:", "Использование в интерфейсе:", "Свойства:" -> null
-            else -> throw UnknownPageBlockType(blockTitle)
+            // Заметка перечисления в модели не хранится — пропускаем молча, без warning.
+            "Примечание:" -> null
+            else -> UnknownBlocks.skip(blockTitle)
         }
 
     override fun onBlockFinished(handler: BlockHandler<*>) {
@@ -83,7 +85,7 @@ class EnumPageParseHandler : PageProxyHandler<EnumInfo>() {
             nameRu = nameRu,
             nameEn = nameEn,
             description = description,
-            relatedObjects = relatedObjects,
+            relatedObjects = relatedObjects?.toList(),
             example = example,
         )
 }

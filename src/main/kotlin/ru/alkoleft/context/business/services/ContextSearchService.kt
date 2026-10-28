@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 alkoleft. All rights reserved.
- * This file is part of the mcp-bsl-context project.
+ * This file is part of the mcp-bsl-platform-context project.
  *
  * Licensed under the MIT License. See LICENSE file in the project root for full license information.
  */
@@ -10,117 +10,162 @@ package ru.alkoleft.context.business.services
 import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.stereotype.Service
 import ru.alkoleft.context.business.entities.Definition
-import ru.alkoleft.context.business.entities.Signature
-import ru.alkoleft.context.business.persistent.PlatformContextRepository
 import ru.alkoleft.context.business.valueobjects.ApiType
 import ru.alkoleft.context.exceptions.InvalidSearchQueryException
 import ru.alkoleft.context.exceptions.PlatformTypeNotFoundException
 import ru.alkoleft.context.exceptions.TypeMemberNotFoundException
+import ru.alkoleft.context.infrastructure.search.CatalogProvider
+import ru.alkoleft.context.infrastructure.search.PlatformCatalog
+import ru.alkoleft.context.infrastructure.search.SearchPage
 
+private val logger = KotlinLogging.logger {}
+
+/**
+ * Поиск по справке платформы: запросы, точные карточки, состав типа и конструкторы.
+ *
+ * Сервис отвечает за валидацию аргументов и границы страниц, а ранжирование и разрешение имён
+ * делает каталог. Все ошибки — доменные исключения с готовым текстом для JSON-ответа.
+ */
 @Service
 class ContextSearchService(
-    private val repository: PlatformContextRepository,
+    private val provider: CatalogProvider,
 ) {
-    private val logger = KotlinLogging.logger {}
-
-    fun searchAll(
+    /** Поиск с ранжированием; пустой запрос — ошибка. */
+    fun search(
         query: String,
         type: String? = null,
         limit: Int? = null,
-    ): List<Definition> {
-        logger.debug { "searchAll called with query='$query', type='$type', limit='$limit'" }
-        if (query.isBlank()) {
-            logger.warn { "searchAll: query is blank" }
-            throw InvalidSearchQueryException("Запрос не может быть пустым")
-        }
-        val effectiveLimit = limit?.coerceIn(1, 50) ?: 10
-        val result = repository.search(query, effectiveLimit, getApiType(type))
-        logger.debug { "searchAll result size: ${result.size}" }
-        return result
+        offset: Int? = null,
+    ): SearchPage {
+        if (query.isBlank()) throw InvalidSearchQueryException("поисковый запрос не может быть пустым")
+        val apiType = parseType(type)
+        val safeLimit = (limit ?: DEFAULT_SEARCH_LIMIT).coerceIn(1, MAX_SEARCH_LIMIT)
+        val safeOffset = (offset ?: 0).coerceAtLeast(0)
+        logger.debug { "search: '$query', type=$apiType, limit=$safeLimit, offset=$safeOffset" }
+        return provider.catalog().search(query, apiType, safeLimit, safeOffset)
     }
 
-    fun getInfo(
+    /**
+     * Точная карточка по имени. Если имя записано как «Тип.Член», ищется член типа.
+     * Если ничего не найдено, возвращаются подсказки вместо исключения — их показывает агент.
+     */
+    fun info(
         name: String,
-        type: String,
-    ): Definition? {
-        logger.debug { "getInfo called with name='$name', type='$type'" }
-        if (name.isBlank() || type.isBlank()) {
-            logger.warn { "getInfo: name or type is blank" }
-            throw InvalidSearchQueryException("Имя элемента и тип элемента не могут быть пустыми")
-        }
+        type: String? = null,
+    ): InfoResult {
+        if (name.isBlank()) throw InvalidSearchQueryException("имя элемента не может быть пустым")
+        val apiType = parseType(type)
+        val catalog = provider.catalog()
 
-        val apiType = getApiType(type)
-        val result =
-            when (apiType) {
-                ApiType.TYPE -> repository.findType(name)
-                ApiType.PROPERTY -> repository.findProperty(name)
-                ApiType.METHOD -> repository.findMethod(name)
-                else -> throw InvalidSearchQueryException("Получение информации для типа '$type' не поддерживается")
-            }
-        logger.debug { "getInfo result: $result" }
-        return result
+        val items = mutableListOf<Definition>()
+        if (apiType == null) qualified(catalog, name)?.let { items += it }
+        if (items.isEmpty()) items += catalog.findExact(name, apiType)
+
+        return if (items.isNotEmpty()) {
+            InfoResult(items)
+        } else {
+            InfoResult(
+                items = emptyList(),
+                suggestions = catalog.suggest(name),
+                memberOwners = catalog.memberOwners(name),
+            )
+        }
     }
 
-    fun findMemberByTypeAndName(
+    /** Член типа (метод или свойство) либо значение перечисления. */
+    fun member(
         typeName: String,
         memberName: String,
     ): Definition {
-        logger.debug { "findMemberByTypeAndName called with typeName='$typeName', memberName='$memberName'" }
-        if (typeName.isBlank() || memberName.isBlank()) {
-            logger.warn { "findMemberByTypeAndName: typeName or memberName is blank" }
-            throw InvalidSearchQueryException("Имя типа и имя элемента не могут быть пустыми")
-        }
+        if (typeName.isBlank()) throw InvalidSearchQueryException("имя типа не может быть пустым")
+        if (memberName.isBlank()) throw InvalidSearchQueryException("имя элемента типа не может быть пустым")
+        val catalog = provider.catalog()
 
-        val type = repository.findType(typeName)
-        if (type == null) {
-            logger.warn { "findMemberByTypeAndName: type '$typeName' not found" }
-            throw PlatformTypeNotFoundException(typeName)
-        }
-
-        val result =
-            repository.findTypeMember(type, memberName)
+        catalog.findType(typeName)?.let { type ->
+            return catalog.findMember(type, memberName)
                 ?: throw TypeMemberNotFoundException(memberName, typeName)
-        logger.debug { "findMemberByTypeAndName result: $result" }
-        return result
+        }
+        catalog.findEnum(typeName)?.let { enum ->
+            return catalog.findEnumValue(enum, memberName)
+                ?: throw TypeMemberNotFoundException(memberName, typeName)
+        }
+        throw PlatformTypeNotFoundException(typeName)
     }
 
-    fun findTypeMembers(typeName: String): List<Definition> {
-        logger.debug { "findTypeMembers called with typeName='$typeName'" }
-        if (typeName.isBlank()) {
-            logger.warn { "findTypeMembers: typeName is blank" }
-            throw InvalidSearchQueryException("Имя типа не может быть пустым")
-        }
-        val type = repository.findType(typeName)
+    /** Состав типа: методы и свойства, а для перечисления — его значения. */
+    fun members(
+        typeName: String,
+        limit: Int? = null,
+        offset: Int? = null,
+    ): MembersPage {
+        if (typeName.isBlank()) throw InvalidSearchQueryException("имя типа не может быть пустым")
+        val catalog = provider.catalog()
+        val safeLimit = (limit ?: DEFAULT_MEMBERS_LIMIT).coerceIn(1, MAX_MEMBERS_LIMIT)
+        val safeOffset = (offset ?: 0).coerceAtLeast(0)
 
-        return if (type != null) {
-            val result = type.methods + type.properties
-            logger.debug { "findTypeMembers result size: ${result.size}" }
-            result
-        } else {
-            logger.warn { "findTypeMembers: type '$typeName' not found" }
-            throw PlatformTypeNotFoundException(typeName)
+        catalog.findType(typeName)?.let { type ->
+            val all = type.members()
+            return MembersPage(typeName, all.size, safeOffset, safeLimit, all.drop(safeOffset).take(safeLimit))
         }
+        catalog.findEnum(typeName)?.let { enum ->
+            val all: List<Definition> = enum.values
+            return MembersPage(typeName, all.size, safeOffset, safeLimit, all.drop(safeOffset).take(safeLimit))
+        }
+        throw PlatformTypeNotFoundException(typeName)
     }
 
-    fun findConstructors(typeName: String): List<Signature> {
-        logger.debug { "findConstructors called with typeName='$typeName'" }
-        if (typeName.isBlank()) {
-            logger.warn { "findConstructors: typeName is blank" }
-            throw InvalidSearchQueryException("Имя типа не может быть пустым")
-        }
-        val type = repository.findType(typeName)
-
-        val result =
-            type?.constructors ?: run {
-                logger.warn { "findConstructors: type '$typeName' not found" }
-                throw PlatformTypeNotFoundException(typeName)
-            }
-        logger.debug { "findConstructors result size: ${result.size}" }
-        return result
+    /** Конструкторы типа. */
+    fun constructors(
+        typeName: String,
+        limit: Int? = null,
+        offset: Int? = null,
+    ): ConstructorsPage {
+        if (typeName.isBlank()) throw InvalidSearchQueryException("имя типа не может быть пустым")
+        val safeLimit = (limit ?: DEFAULT_CONSTRUCTORS_LIMIT).coerceIn(1, MAX_CONSTRUCTORS_LIMIT)
+        val safeOffset = (offset ?: 0).coerceAtLeast(0)
+        val type = provider.catalog().findType(typeName) ?: throw PlatformTypeNotFoundException(typeName)
+        val all = type.constructors
+        return ConstructorsPage(typeName, all.size, safeOffset, safeLimit, all.drop(safeOffset).take(safeLimit))
     }
 
-    fun getApiType(type: String?): ApiType? {
+    /** Похожие имена для подсказки в ошибке. */
+    fun suggest(query: String): List<String> = runCatching { provider.catalog().suggest(query) }.getOrDefault(emptyList())
+
+    /** Типы, у которых есть элемент с таким именем. */
+    fun memberOwners(query: String): List<String> = runCatching { provider.catalog().memberOwners(query) }.getOrDefault(emptyList())
+
+    private fun parseType(type: String?): ApiType? {
         if (type.isNullOrBlank()) return null
-        return ApiType.getType(type) ?: throw InvalidSearchQueryException("Неизвестный тип '$type' искомого элемента")
+        return ApiType.getType(type)
+            ?: throw InvalidSearchQueryException(
+                "неизвестный вид элемента «$type»; допустимо: method, property, type, enum",
+            )
+    }
+
+    private fun qualified(
+        catalog: PlatformCatalog,
+        name: String,
+    ): Definition? {
+        if (!name.contains('.')) return null
+        val typeName = name.substringBeforeLast('.').trim()
+        val memberName = name.substringAfterLast('.').trim()
+        if (typeName.isEmpty() || memberName.isEmpty()) return null
+        catalog.findType(typeName)?.let { type -> catalog.findMember(type, memberName)?.let { return it } }
+        catalog.findEnum(typeName)?.let { enum -> catalog.findEnumValue(enum, memberName)?.let { return it } }
+        return null
+    }
+
+    private fun invalidType(type: String?): Nothing =
+        throw InvalidSearchQueryException(
+            "неизвестный вид элемента «$type»; допустимо: method, property, type, enum",
+        )
+
+    companion object {
+        const val DEFAULT_SEARCH_LIMIT = 10
+        const val MAX_SEARCH_LIMIT = 50
+        const val DEFAULT_MEMBERS_LIMIT = 100
+        const val MAX_MEMBERS_LIMIT = 500
+        const val DEFAULT_CONSTRUCTORS_LIMIT = 20
+        const val MAX_CONSTRUCTORS_LIMIT = 100
     }
 }

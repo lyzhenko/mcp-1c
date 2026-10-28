@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 alkoleft. All rights reserved.
- * This file is part of the mcp-bsl-context project.
+ * This file is part of the mcp-bsl-platform-context project.
  *
  * Licensed under the MIT License. See LICENSE file in the project root for full license information.
  */
@@ -8,65 +8,49 @@
 package ru.alkoleft.context.business.valueobjects
 
 /**
- * Value Object: Типы API элементов платформы 1С Предприятие
+ * Вид элемента API платформы: метод, свойство, тип, перечисление.
+ *
+ * Конструкторы не выделены в отдельный вид: они принадлежат типу и отдаются инструментом
+ * `getConstructors`, а в поиске участвуют как часть типа.
  */
 enum class ApiType {
     METHOD,
     PROPERTY,
     TYPE,
-    CONSTRUCTOR,
+    ENUM,
     ;
 
-    /**
-     * Получение отображаемого имени
-     */
     fun getDisplayName(): String =
         when (this) {
             METHOD -> "Метод"
             PROPERTY -> "Свойство"
             TYPE -> "Тип"
-            CONSTRUCTOR -> "Конструктор"
+            ENUM -> "Перечисление"
         }
 
-    /**
-     * Получение множественного числа
-     */
     fun getPluralName(): String =
         when (this) {
             METHOD -> "Методы"
             PROPERTY -> "Свойства"
             TYPE -> "Типы"
-            CONSTRUCTOR -> "Конструкторы"
+            ENUM -> "Перечисления"
         }
 
     companion object {
-        fun getType(type: String) =
-            when (type.lowercase()) {
-                "object",
-                "class",
-                "datatype",
-                "объект",
-                "класс",
-                "тип",
-                "структура",
-                "данные",
-                "type",
-                -> TYPE
+        /** Разбор значения аргумента `type`; null — фильтра нет. */
+        fun getType(type: String?): ApiType? {
+            if (type.isNullOrBlank()) return null
+            return when (type.trim().lowercase()) {
+                "object", "class", "datatype", "объект", "класс", "тип", "структура", "данные", "type" -> TYPE
 
-                "метод",
-                "функция",
-                "процедура",
-                "method",
-                -> METHOD
+                "метод", "функция", "процедура", "method", "function", "procedure" -> METHOD
 
-                "свойство",
-                "реквизит",
-                "поле",
-                "атрибут",
-                "property",
-                -> PROPERTY
+                "свойство", "реквизит", "поле", "атрибут", "property", "attribute" -> PROPERTY
+
+                "перечисление", "значение перечисления", "enum", "enumeration" -> ENUM
 
                 else -> null
             }
+        }
     }
 }

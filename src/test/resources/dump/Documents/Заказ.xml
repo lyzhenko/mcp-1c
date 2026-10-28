@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<Document uuid="00000000-0000-0000-0000-000000000201">
+		<Properties>
+			<Name>Заказ</Name>
+			<Synonym>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Заказ покупателя</v8:content>
+				</v8:item>
+			</Synonym>
+		</Properties>
+		<ChildObjects>
+			<Attribute uuid="00000000-0000-0000-0000-000000000202">
+				<Properties>
+					<Name>Сумма</Name>
+					<Type>
+						<v8:Type>xs:decimal</v8:Type>
+					</Type>
+				</Properties>
+			</Attribute>
+		</ChildObjects>
+	</Document>
+</MetaDataObject>

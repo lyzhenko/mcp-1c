@@ -1,0 +1,234 @@
+/*
+ * Copyright (c) 2025 alkoleft. All rights reserved.
+ * This file is part of the mcp-bsl-platform-context project.
+ *
+ * Licensed under the MIT License. See LICENSE file in the project root for full license information.
+ */
+
+package ru.alkoleft.context.presentation.formatters
+
+import ru.alkoleft.context.business.entities.DumpField
+import ru.alkoleft.context.business.entities.DumpRoutine
+import ru.alkoleft.context.business.services.DumpCodeResult
+import ru.alkoleft.context.business.services.DumpMetadataCard
+import ru.alkoleft.context.business.services.DumpSearchItem
+import ru.alkoleft.context.business.services.DumpSearchPage
+import ru.alkoleft.context.business.services.GrepResult
+import ru.alkoleft.context.infrastructure.dump.DumpSnapshot
+import ru.alkoleft.context.infrastructure.dump.DumpStorage
+import java.time.Instant
+
+/**
+ * JSON-ответы инструментов выгрузки конфигурации.
+ *
+ * Формат тот же, что у справки по платформе: `kind`, `total`/`returned`/`nextOffset`,
+ * `truncated` при сокращении. Размер ограничивает общий [JsonPager].
+ */
+class DumpJsonService(
+    private val pager: JsonPager = JsonPager(),
+) {
+    fun search(page: DumpSearchPage): String {
+        val header = linkedMapOf<String, Any?>("query" to page.query, "kind" to page.kind, "total" to page.total)
+        if (page.suggestions.isNotEmpty()) header["suggestions"] = page.suggestions
+        return pager.page(
+            header = header,
+            items = page.items,
+            offset = page.offset,
+            total = page.total,
+            render = ::searchItem,
+            hint =
+                if (page.items.isEmpty()) {
+                    "Ничего не найдено. Уточните имя или вид: object, routine, field."
+                } else {
+                    "Карточка — dumpMetadata; код модуля — dumpCode; текст — dumpGrep."
+                },
+        )
+    }
+
+    fun metadata(card: DumpMetadataCard): String {
+        val obj = card.obj
+        val frame =
+            linkedMapOf<String, Any?>(
+                "found" to true,
+                "kind" to obj.kind,
+                "name" to obj.name,
+                "synonym" to obj.synonym.takeIf { it.isNotBlank() },
+                "path" to obj.path,
+                "counts" to
+                    linkedMapOf<String, Any?>(
+                        "attributes" to card.attributes.size,
+                        "tabularSections" to card.tabularSections.size,
+                        "enumValues" to card.enumValues.size,
+                        "forms" to card.forms.size,
+                        "commands" to card.commands.size,
+                        "templates" to card.templates.size,
+                        "modules" to card.modules.size,
+                        "fields" to card.totalFields,
+                    ),
+                "attributes" to card.attributes.map(::fieldNode).takeIf { it.isNotEmpty() },
+                "tabularSections" to
+                    card.tabularSections
+                        .map { section ->
+                            linkedMapOf<String, Any?>(
+                                "name" to section.name,
+                                "synonym" to section.synonym.takeIf { it.isNotBlank() },
+                                "fields" to section.fields.map(::fieldNode),
+                            ).withoutNulls()
+                        }.takeIf { it.isNotEmpty() },
+                "enumValues" to card.enumValues.map(::fieldNode).takeIf { it.isNotEmpty() },
+                "forms" to card.forms.takeIf { it.isNotEmpty() },
+                "commands" to card.commands.takeIf { it.isNotEmpty() },
+                "templates" to card.templates.takeIf { it.isNotEmpty() },
+                "modules" to card.modules.map(::moduleCard).takeIf { it.isNotEmpty() },
+                "truncated" to card.truncated,
+                "hint" to
+                    if (card.modules.isNotEmpty()) {
+                        "Код модуля — dumpCode(path=…, id=…); процедуры — в routines."
+                    } else {
+                        "У объекта нет модулей."
+                    },
+            )
+        return pager.fit(frame.withoutNulls())
+    }
+
+    fun code(result: DumpCodeResult): String =
+        pager.fit(
+            linkedMapOf<String, Any?>(
+                "path" to result.path,
+                "moduleKind" to result.moduleKind,
+                "owner" to result.owner,
+                "totalLines" to result.totalLines,
+                "from" to result.from,
+                "to" to result.to,
+                "text" to result.text,
+                "hint" to
+                    if (result.to < result.totalLines) {
+                        "Продолжение — from=${result.to + 1}; не больше ${result.to - result.from + 1} строк за вызов."
+                    } else {
+                        null
+                    },
+            ).withoutNulls(),
+        )
+
+    fun grep(result: GrepResult): String {
+        val frame =
+            linkedMapOf<String, Any?>(
+                "pattern" to result.pattern,
+                "hits" to
+                    result.hits.map { hit ->
+                        linkedMapOf<String, Any?>(
+                            "path" to hit.path,
+                            "line" to hit.line,
+                            "text" to hit.text,
+                            "owner" to hit.owner,
+                            "routine" to hit.routine,
+                        ).withoutNulls()
+                    },
+                "filesScanned" to result.filesScanned,
+                "totalFiles" to result.totalFiles,
+                "complete" to result.complete,
+                "elapsedMs" to result.elapsedMs,
+                "hint" to
+                    if (!result.complete) {
+                        "Поиск остановлен: увеличьте deadlineMs, сузьте paths или extensions."
+                    } else {
+                        null
+                    },
+            )
+        return pager.fit(frame.withoutNulls())
+    }
+
+    fun statusJson(snapshot: DumpSnapshot): String = pager.fit(status(snapshot))
+
+    /** Ошибка в том же виде, что у инструментов справки. */
+    fun error(
+        code: String,
+        message: String,
+        suggestions: List<String> = emptyList(),
+    ): String {
+        val error = linkedMapOf<String, Any?>("code" to code, "message" to message)
+        if (suggestions.isNotEmpty()) error["suggestions"] = suggestions
+        return pager.fit(linkedMapOf("error" to error))
+    }
+
+    fun status(snapshot: DumpSnapshot): Map<String, Any?> =
+        linkedMapOf<String, Any?>(
+            "state" to snapshot.state.name.lowercase(),
+            "path" to snapshot.path,
+            "error" to snapshot.error,
+            "elapsedMs" to snapshot.elapsedMs,
+            "progress" to
+                snapshot.progress?.let { progress ->
+                    linkedMapOf<String, Any?>(
+                        "phase" to progress.phase,
+                        "done" to progress.done,
+                        "total" to progress.total,
+                    )
+                },
+            "index" to
+                snapshot.indexFile?.let { file ->
+                    linkedMapOf<String, Any?>("file" to file.toString(), "bytes" to snapshot.indexBytes)
+                },
+            "info" to
+                snapshot.info?.let { info ->
+                    linkedMapOf<String, Any?>(
+                        "configuration" to info.configuration,
+                        "version" to info.version,
+                        "objects" to info.objects,
+                        "fields" to info.fields,
+                        "modules" to info.modules,
+                        "routines" to info.routines,
+                        "buildMillis" to info.buildMillis,
+                        "indexedAt" to info.indexedAt.takeIf { it > 0 }?.let { Instant.ofEpochMilli(it).toString() },
+                    ).withoutNulls()
+                },
+            "hint" to
+                when (snapshot.state) {
+                    DumpStorage.State.LOADING -> "Индекс строится; повторите запрос через несколько секунд."
+                    DumpStorage.State.FAILED -> "Проверьте путь к выгрузке и повторите dumpOpen."
+                    DumpStorage.State.CLOSED -> "Выгрузка не открыта: --dump <каталог> или dumpOpen."
+                    else -> null
+                },
+        ).withoutNulls()
+
+    private fun searchItem(item: DumpSearchItem): Map<String, Any?> =
+        linkedMapOf<String, Any?>(
+            "kind" to item.kind,
+            "name" to item.name,
+            "synonym" to item.synonym.takeIf { it.isNotBlank() },
+            "owner" to item.owner,
+            "path" to item.path,
+            "detail" to item.detail,
+            "id" to item.id.takeIf { it > 0 },
+        ).withoutNulls()
+
+    private fun fieldNode(field: DumpField): Map<String, Any?> =
+        linkedMapOf<String, Any?>(
+            "name" to field.name,
+            "synonym" to field.synonym.takeIf { it.isNotBlank() },
+            "type" to field.type.takeIf { it.isNotBlank() },
+            "fieldKind" to field.fieldKind,
+            "tabular" to field.tabular,
+        ).withoutNulls()
+
+    private fun moduleCard(card: ru.alkoleft.context.business.services.DumpModuleCard): Map<String, Any?> =
+        linkedMapOf<String, Any?>(
+            "id" to card.module.id,
+            "path" to card.module.path,
+            "kind" to card.module.kind,
+            "lines" to card.module.lines,
+            "routinesTotal" to card.routinesTotal,
+            "routines" to card.routines.map(::routineNode),
+        ).withoutNulls()
+
+    private fun routineNode(routine: DumpRoutine): Map<String, Any?> =
+        linkedMapOf<String, Any?>(
+            "name" to routine.name,
+            "kind" to routine.kind,
+            "export" to routine.export,
+            "parameters" to routine.parameters.takeIf { it.isNotBlank() },
+            "lines" to "${routine.startLine}-${routine.endLine}",
+        ).withoutNulls()
+
+    private fun Map<String, Any?>.withoutNulls(): Map<String, Any?> = filterValues { it != null }
+}

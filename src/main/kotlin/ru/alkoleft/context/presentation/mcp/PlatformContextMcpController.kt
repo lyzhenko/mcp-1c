@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2024-2025 alkoleft. All rights reserved.
- * This file is part of the mcp-bsl-context project.
+ * This file is part of the mcp-bsl-platform-context project.
  *
  * Licensed under the MIT License. See LICENSE file in the project root for full license information.
  */
@@ -12,163 +12,205 @@ import org.springframework.ai.tool.annotation.Tool
 import org.springframework.ai.tool.annotation.ToolParam
 import org.springframework.stereotype.Service
 import ru.alkoleft.context.business.services.ContextSearchService
-import ru.alkoleft.context.business.services.ResponseFormatterService
+import ru.alkoleft.context.business.services.DumpService
+import ru.alkoleft.context.business.services.PlatformStatusService
+import ru.alkoleft.context.exceptions.DomainException
+import ru.alkoleft.context.exceptions.InvalidSearchQueryException
+import ru.alkoleft.context.exceptions.PlatformContextLoadException
+import ru.alkoleft.context.exceptions.PlatformNotReadyException
+import ru.alkoleft.context.exceptions.PlatformTypeNotFoundException
+import ru.alkoleft.context.exceptions.TypeMemberNotFoundException
+import ru.alkoleft.context.presentation.formatters.DumpJsonService
+import ru.alkoleft.context.presentation.formatters.JsonResponseService
 
 private val logger = KotlinLogging.logger {}
 
 /**
- * MCP Service для поиска API платформы 1С
+ * MCP-инструменты справки по API платформы 1С.
  *
- * Presentation Layer компонент, предоставляющий MCP интерфейс для поиска API
+ * Все инструменты возвращают JSON. Ошибки не выбрасываются наружу протокола, а приходят
+ * ответом с `error.code` и подсказками: агенту проще исправить запрос, чем разбирать текст
+ * исключения. Если модель платформы ещё грузится, ответ честно говорит об этом (`platform_not_ready`).
  */
 @Service
 class PlatformContextMcpController(
     private val searchService: ContextSearchService,
-    private val formatter: ResponseFormatterService,
+    private val statusService: PlatformStatusService,
+    private val formatter: JsonResponseService,
+    private val dumpService: DumpService,
+    private val dumpFormatter: DumpJsonService,
 ) {
-    /**
-     * Поиск по API платформы 1С Предприятие
-     */
+    private val serverVersion: String =
+        PlatformContextMcpController::class.java.`package`?.implementationVersion ?: "dev"
+
     @Tool(
         name = "search",
-        description = "Поиск по API платформы 1С Предприятие. Используйте конкретные термины 1С для получения точных результатов.",
+        resultConverter = RawJsonResultConverter::class,
+        description =
+            "Поиск по справке платформы 1С: глобальные методы и свойства, типы, перечисления " +
+                "и члены типов. Возвращает совпадения с владельцем (owner) и коротким описанием. " +
+                "Полная карточка — info, член конкретного типа — getMember.",
     )
     fun search(
         @ToolParam(
             description =
-                "Поисковый запрос. Используйте конкретные термины из 1С: " +
-                    "методы ('СтрНайти', 'ВыполнитьПроверкуПравДоступа'), " +
-                    "типы ('Справочник', 'Документ'), " +
-                    "свойства ('БезопасноеХранилище', 'ПланыСчетов', 'СредстваМультимедиа')",
+                "Имя или его часть: «СтрНайти», «ТаблицаЗначений», «РежимСовместимости». " +
+                    "Можно писать «Тип.Член»: «Массив.Добавить».",
         )
         query: String,
         @ToolParam(
-            description =
-                "Тип искомого элемента API: " +
-                    "'method' - глобальные методы, " +
-                    "'property' - глобальные свойства, " +
-                    "'type' - типы данных, " +
-                    "null - все типы",
+            description = "Вид элемента: method, property, type, enum. Не задан — искать по всем видам.",
+            required = false,
         )
         type: String? = null,
-        @ToolParam(description = "Максимальное количество результатов (по умолчанию 10, максимум 50)")
+        @ToolParam(description = "Сколько результатов вернуть: 1–50, по умолчанию 10.", required = false)
         limit: Int? = null,
-    ): String {
-        logger.debug { "search called with query='$query', type='$type', limit='$limit'" }
-        try {
-            val result = searchService.searchAll(query, type, limit)
-            logger.debug { "search result size: ${result.size}" }
-            return formatter.formatQuery(query) +
-                formatter.formatSearchResults(result)
-        } catch (e: Exception) {
-            logger.error(e) { "Ошибка при выполнении поиска" }
-            return formatter.formatError(e)
+        @ToolParam(description = "Сколько первых совпадений пропустить — для следующей страницы.", required = false)
+        offset: Int? = null,
+    ): String =
+        respond("search", query) {
+            formatter.search(searchService.search(query, type, limit, offset))
         }
-    }
 
-    /**
-     * Получение детальной информации об API элементе
-     */
     @Tool(
         name = "info",
-        description = "Получение детальной информации об элементе API платформы 1С. Требует точное имя элемента.",
+        resultConverter = RawJsonResultConverter::class,
+        description =
+            "Точная карточка элемента API: сигнатуры с параметрами, возвращаемый тип, примеры " +
+                "и примечания. Для типа — состав и счётчики, для перечисления — значения.",
     )
     fun getInfo(
-        @ToolParam(description = "Точное имя элемента API в 1С. Примеры: 'НайтиПоСсылке', 'СправочникСсылка', 'Ссылка', 'Код'")
+        @ToolParam(description = "Точное имя элемента: «НайтиПоСсылке», «Строка», «Проведен». Можно «Тип.Член».")
         name: String,
         @ToolParam(
-            description =
-                "Уточнение типа элемента: " +
-                    "'method' - метод/функция, " +
-                    "'property' - свойство/реквизит, " +
-                    "'type' - тип данных",
+            description = "Вид элемента, если имя неоднозначно: method, property, type, enum.",
+            required = false,
         )
-        type: String,
-    ): String {
-        logger.debug { "getInfo called with name='$name', type='$type'" }
-        try {
-            val definition = searchService.getInfo(name, type)
-            logger.debug { "getInfo result: $definition" }
-            return formatter.formatMember(definition)
-        } catch (e: Exception) {
-            logger.error(e) { "Ошибка при получении информации об элементе" }
-            return "❌ **Ошибка:** ${e.message}"
+        type: String? = null,
+    ): String =
+        respond("info", name) {
+            formatter.info(searchService.info(name, type))
         }
-    }
 
-    /**
-     * Получение информации об элементе типа (методе или свойстве)
-     */
     @Tool(
         name = "getMember",
-        description = "Получение информации о методе или свойстве конкретного типа 1С. Используйте точные имена типов и элементов.",
+        resultConverter = RawJsonResultConverter::class,
+        description =
+            "Метод, свойство или значение перечисления конкретного типа: синтаксис, параметры, " +
+                "описание и примечания. Пример: typeName=\"Массив\", memberName=\"Добавить\".",
     )
     fun getMember(
-        @ToolParam(description = "Имя типа 1С. Примеры: 'СправочникСсылка', 'ДокументОбъект', 'Строка', 'Число', 'Дата'")
+        @ToolParam(description = "Имя типа: «ТаблицаЗначений», «Массив», «Структура».")
         typeName: String,
-        @ToolParam(description = "Имя метода или свойства типа. Примеры: 'НайтиПоКоду', 'Записать', 'Код', 'Наименование', 'Длина'")
+        @ToolParam(description = "Имя метода, свойства или значения перечисления: «Добавить», «Колонки».")
         memberName: String,
-    ): String {
-        logger.debug { "getMember called with typeName='$typeName', memberName='$memberName'" }
-        try {
-            val definition = searchService.findMemberByTypeAndName(typeName, memberName)
-            logger.debug { "getMember result: $definition" }
-            return formatter.formatMember(definition)
-        } catch (e: Exception) {
-            logger.error(e) { "Ошибка при получении информации об элементе типа" }
-            return formatter.formatError(e)
+    ): String =
+        respond("getMember", memberName) {
+            formatter.definition(searchService.member(typeName, memberName))
         }
-    }
 
-    /**
-     * Получение полного списка всех методов и свойств для указанного типа 1С
-     */
     @Tool(
         name = "getMembers",
-        description = "Получение полного списка всех методов и свойств для указанного типа 1С. Полный справочник API типа.",
+        resultConverter = RawJsonResultConverter::class,
+        description =
+            "Состав типа: методы и свойства (у перечисления — значения). Возвращает страницу; " +
+                "у методов есть синтаксис и параметры. Для большого типа используйте offset.",
     )
     fun getMembers(
-        @ToolParam(
-            description =
-                "Имя типа 1С для получения полного списка методов и свойств. " +
-                    "Примеры: 'СправочникСсылка', 'ДокументОбъект', 'Строка', 'ТаблицаЗначений', 'Запрос'",
-        )
+        @ToolParam(description = "Имя типа: «ТаблицаЗначений», «Массив», «Запрос».")
         typeName: String,
-    ): String {
-        logger.debug { "getMembers called with typeName='$typeName'" }
-        try {
-            val definition = searchService.findTypeMembers(typeName)
-            logger.debug { "getMembers result size: ${definition.size}" }
-            return formatter.formatTypeMembers(definition)
-        } catch (e: Exception) {
-            logger.error(e) { "Ошибка при получении информации об элементе типа" }
-            return formatter.formatError(e)
+        @ToolParam(description = "Сколько членов вернуть: 1–500, по умолчанию 100.", required = false)
+        limit: Int? = null,
+        @ToolParam(description = "Сколько членов пропустить — для следующей страницы.", required = false)
+        offset: Int? = null,
+    ): String =
+        respond("getMembers", typeName) {
+            formatter.members(searchService.members(typeName, limit, offset))
         }
-    }
 
-    /**
-     * Получение списка конструкторов для указанного типа 1С
-     */
     @Tool(
         name = "getConstructors",
-        description = "Получение списка конструкторов для указанного типа 1С. Показывает способы создания объектов данного типа.",
+        resultConverter = RawJsonResultConverter::class,
+        description =
+            "Конструкторы типа: варианты синтаксиса «Новый <Тип>(...)» с параметрами и описанием. " +
+                "Если раздела нет, ответ объясняет, как объект создаётся вместо конструктора.",
     )
     fun getConstructors(
-        @ToolParam(
-            description =
-                "Имя типа 1С для получения конструкторов. " +
-                    "Примеры: 'СправочникМенеджер', 'ДокументМенеджер', 'Запрос', 'ТаблицаЗначений'",
-        )
+        @ToolParam(description = "Имя типа: «Структура», «ТаблицаЗначений», «Массив».")
         typeName: String,
-    ): String {
-        logger.debug { "getConstructors called with typeName='$typeName'" }
+        @ToolParam(description = "Сколько конструкторов вернуть: 1–100, по умолчанию 20.", required = false)
+        limit: Int? = null,
+        @ToolParam(description = "Сколько конструкторов пропустить — для следующей страницы.", required = false)
+        offset: Int? = null,
+    ): String =
+        respond("getConstructors", typeName) {
+            formatter.constructors(searchService.constructors(typeName, limit, offset))
+        }
+
+    @Tool(
+        name = "status",
+        resultConverter = RawJsonResultConverter::class,
+        description =
+            "Состояние сервера: загружена ли справка платформы, какая версия и язык, сколько " +
+                "элементов в каталоге, включён ли кэш и какие платформы установлены. Не ждёт разбора.",
+    )
+    fun status(): String =
+        respond("status") {
+            formatter.status(
+                statusService.status(),
+                serverVersion,
+                McpToolCatalog.TOOLS,
+                dump = dumpFormatter.status(dumpService.status()),
+            )
+        }
+
+    private fun respond(
+        tool: String,
+        hintName: String? = null,
+        block: () -> String,
+    ): String =
         try {
-            val result = searchService.findConstructors(typeName)
-            logger.debug { "getConstructors result size: ${result.size}" }
-            return formatter.formatConstructors(result, typeName)
-        } catch (e: Exception) {
-            logger.error(e) { "Ошибка при получении информации об элементе типа" }
-            return formatter.formatError(e)
+            block()
+        } catch (error: Throwable) {
+            failure(tool, error, hintName)
+        }
+
+    private fun failure(
+        tool: String,
+        error: Throwable,
+        hintName: String?,
+    ): String {
+        val suggestions =
+            hintName
+                ?.takeIf { it.isNotBlank() }
+                ?.let { searchService.suggest(it) }
+                .orEmpty()
+        return when (error) {
+            is PlatformNotReadyException ->
+                formatter.error("platform_not_ready", error.message ?: "Справка платформы ещё загружается")
+
+            is PlatformContextLoadException ->
+                formatter.error("platform_load_failed", error.message ?: "Не удалось загрузить справку платформы")
+
+            is PlatformTypeNotFoundException ->
+                formatter.error("type_not_found", error.message ?: "Тип не найден", suggestions = suggestions)
+
+            is TypeMemberNotFoundException ->
+                formatter.error("member_not_found", error.message ?: "Элемент типа не найден", suggestions = suggestions)
+
+            is InvalidSearchQueryException ->
+                formatter.error("invalid_request", error.message ?: "Невалидный запрос")
+
+            is DomainException ->
+                formatter.error("error", error.message ?: "Ошибка запроса", suggestions = suggestions)
+
+            else -> {
+                logger.error(error) { "Ошибка инструмента $tool" }
+                formatter.error(
+                    "internal",
+                    "Внутренняя ошибка сервера: ${error.message ?: error.javaClass.simpleName}",
+                )
+            }
         }
     }
 }

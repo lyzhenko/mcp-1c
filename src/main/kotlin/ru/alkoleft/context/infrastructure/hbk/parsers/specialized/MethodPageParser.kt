@@ -8,7 +8,6 @@
 package ru.alkoleft.context.infrastructure.hbk.parsers.specialized
 
 import ru.alkoleft.context.infrastructure.hbk.exceptions.HandlerProcessingNotImplemented
-import ru.alkoleft.context.infrastructure.hbk.exceptions.UnknownPageBlockType
 import ru.alkoleft.context.infrastructure.hbk.models.MethodInfo
 import ru.alkoleft.context.infrastructure.hbk.models.MethodSignatureInfo
 import ru.alkoleft.context.infrastructure.hbk.models.RelatedObject
@@ -24,6 +23,7 @@ import ru.alkoleft.context.infrastructure.hbk.parsers.core.ParametersBlockHandle
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.RelatedObjectsBlockHandler
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.SignatureDescriptionBlockHandler
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.SyntaxBlockHandler
+import ru.alkoleft.context.infrastructure.hbk.parsers.core.UnknownBlocks
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.ValueInfoBlockHandler
 
 /**
@@ -79,7 +79,7 @@ class MethodPageProxyHandler : PageProxyHandler<MethodInfo>() {
                 "См. также:" -> RelatedObjectsBlockHandler() // Placeholder, can be a specific handler
                 "Примечание:" -> NoteBlockHandler()
                 "Доступность:", "Использование в версии:", "Использование в интерфейсе:" -> null
-                else -> throw UnknownPageBlockType(blockTitle)
+                else -> UnknownBlocks.skip(blockTitle)
             }
         }
 
@@ -122,9 +122,10 @@ class MethodPageProxyHandler : PageProxyHandler<MethodInfo>() {
         MethodInfo(
             nameRu = nameRu as String,
             nameEn = nameEn as String,
-            signatures = signatures,
+            // Копия обязательна: прокси переиспользуется, а его список очищается при следующей странице.
+            signatures = signatures.toList(),
             example = example,
-            relatedObjects = relatedObjects,
+            relatedObjects = relatedObjects?.toList(),
             note = note,
             description = description,
             returnValue = returnValue,

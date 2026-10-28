@@ -1,7 +1,8 @@
 package ru.alkoleft.context.platform.mcp.integration
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -10,240 +11,161 @@ import org.springframework.test.context.ActiveProfiles
 import ru.alkoleft.context.McpServerApplication
 import ru.alkoleft.context.presentation.mcp.PlatformContextMcpController
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
- * Основной интеграционный тест для MCP сервера
- * Тестирует базовую функциональность и интеграцию компонентов
+ * Интеграционные тесты MCP-инструментов на реальной справке установленной платформы.
+ *
+ * Проверяют JSON-контракт и то, что из `.hbk` до ответа доезжают сигнатуры, параметры,
+ * конструкторы и перечисления — раньше они терялись на маппинге.
  */
 @SpringBootTest(classes = [McpServerApplication::class])
 @ActiveProfiles("test")
-@DisplayName("MCP Server Integration Tests")
+@DisplayName("MCP-инструменты справки платформы")
 class McpServerIntegrationTest {
     private val logger = KotlinLogging.logger {}
+    private val mapper = jacksonObjectMapper()
 
     @Autowired
     private lateinit var mcpController: PlatformContextMcpController
 
-    @BeforeEach
-    fun setUp() {
-        logger.info { "Настройка интеграционного теста MCP сервера" }
+    private fun json(text: String): JsonNode {
+        logger.info { text.take(600) }
+        return mapper.readTree(text)
     }
 
     @Test
-    @DisplayName("MCP сервер должен успешно запускаться")
-    fun testMcpServerStartup() {
-        // Arrange & Act
-        val isControllerAvailable = ::mcpController.isInitialized
-
-        // Assert
-        assert(isControllerAvailable) { "MCP контроллер должен быть доступен" }
-        logger.info { "✅ MCP сервер успешно запущен" }
+    @DisplayName("сервер поднимается и контроллер доступен")
+    fun serverStarts() {
+        assertTrue(::mcpController.isInitialized)
     }
 
     @Test
-    @DisplayName("Поиск должен возвращать корректную структуру ответа")
-    fun testSearchResponseStructure() {
-        // Arrange
-        val query = "СтрНайти"
-
-        // Act
-        val result = mcpController.search(query)
-
-        // Assert
-        assert(result.isNotEmpty()) { "Поиск должен возвращать результаты" }
-        assert(!result.contains("❌ **Не найдено:** Ничего не найдено")) { "Поиск не должен возвращать ошибку для корректного запроса" }
-        assert(result.contains("СтрНайти") || result.contains("Поиск")) { "Результат должен содержать информацию о поиске" }
-
-        logger.info { "✅ Структура ответа поиска корректна" }
+    @DisplayName("search находит метод и отдаёт владельца и вид")
+    fun searchFindsGlobalMethod() {
+        val node = json(mcpController.search("СтрНайти"))
+        assertTrue(node["total"].asInt() > 0, "ожидались совпадения: $node")
+        val first = node["results"].first()
+        assertEquals("method", first["kind"].asText())
+        assertTrue(first["name"].asText().contains("СтрНайти"))
     }
 
     @Test
-    @DisplayName("Поиск должен обрабатывать пустые запросы")
-    fun testSearchEmptyQuery() {
-        // Arrange
-        val query = ""
+    @DisplayName("search уважает limit и offset")
+    fun searchPaginates() {
+        val first = json(mcpController.search("Стр", limit = 2))
+        val returned = first["returned"].asInt()
+        assertTrue(returned in 1..2, "returned=$returned")
+        assertEquals(2, first["nextOffset"].asInt(), "total=${first["total"]}, nextOffset=${first["nextOffset"]}")
+        val next = json(mcpController.search("Стр", limit = 2, offset = first["nextOffset"].asInt()))
+        assertTrue(next["results"].size() > 0, "вторая страница пуста")
+    }
 
-        // Act
-        val result = mcpController.search(query)
+    @Test
+    @DisplayName("search по типу возвращает только этот вид")
+    fun searchFiltersByType() {
+        val node = json(mcpController.search("Таблица", type = "type"))
+        assertTrue(node["total"].asInt() > 0)
+        node["results"].forEach { assertEquals("type", it["kind"].asText()) }
+    }
 
-        // Assert
-        assert(result.isNotEmpty()) { "Пустой запрос должен обрабатываться корректно" }
-        assertEquals(
-            "❌ Невалидный поисковый запрос: Запрос не может быть пустым",
-            result,
-            "Поиск должен возвращать ошибку для пустого запроса",
+    @Test
+    @DisplayName("пустой запрос — ошибка invalid_request, а не исключение")
+    fun searchRejectsEmptyQuery() {
+        val node = json(mcpController.search("   "))
+        assertEquals("invalid_request", node["error"]["code"].asText())
+    }
+
+    @Test
+    @DisplayName("info отдаёт сигнатуру и параметры глобального метода")
+    fun infoHasSignature() {
+        val node = json(mcpController.getInfo("СтрНайти", "method"))
+        assertTrue(node["found"].asBoolean())
+        assertEquals("method", node["kind"].asText())
+        val signatures = node["signatures"]
+        assertTrue(signatures != null && signatures.size() > 0, "у метода нет сигнатуры: $node")
+        val parameters = signatures.first()["parameters"]
+        assertTrue(parameters != null && parameters.size() >= 2, "у сигнатуры нет параметров: $node")
+    }
+
+    @Test
+    @DisplayName("info по типу отдаёт счётчики состава")
+    fun infoTypeHasCounts() {
+        val node = json(mcpController.getInfo("ТаблицаЗначений"))
+        assertEquals("type", node["kind"].asText())
+        assertTrue(node["counts"]["methods"].asInt() > 0)
+    }
+
+    @Test
+    @DisplayName("getMember находит свойство типа")
+    fun getMemberFindsProperty() {
+        val node = json(mcpController.getMember("ТаблицаЗначений", "Колонки"))
+        assertEquals("property", node["kind"].asText())
+        assertEquals("Колонки", node["name"].asText())
+    }
+
+    @Test
+    @DisplayName("getMember отдаёт синтаксис своего метода, а не соседнего")
+    fun getMemberHasOwnSyntax() {
+        val node = json(mcpController.getMember("Массив", "Добавить"))
+        val syntax = node["signatures"].first()["syntax"].asText()
+        assertTrue(syntax.contains("Добавить"), "в сигнатуре чужой метод: $syntax")
+    }
+
+    @Test
+    @DisplayName("getMembers отдаёт состав типа и синтаксис методов")
+    fun getMembersHasSignatures() {
+        val node = json(mcpController.getMembers("ТаблицаЗначений"))
+        assertTrue(node["total"].asInt() > 0)
+        val results = node["results"]
+        assertTrue(results.size() > 0)
+        assertTrue(
+            results.any { it.has("signatures") && it["signatures"].size() > 0 },
+            "ни у одного метода нет сигнатуры: $node",
         )
     }
 
     @Test
-    @DisplayName("Поиск должен поддерживать ограничение результатов")
-    fun testSearchWithLimit() {
-        // Arrange
-        val limit = 2
-        val query = "Стр"
-
-        // Act
-        val result = mcpController.search(query, limit = limit)
-
-        // Assert
-        assert(result.isNotEmpty()) { "Поиск с ограничением должен возвращать результат" }
-        assert(!result.contains("❌")) { "Поиск с ограничением не должен возвращать ошибку для корректного запроса" }
-
-        logger.info { "✅ Поиск с ограничением работает корректно" }
-    }
-
-    @Test
-    @DisplayName("Поиск должен поддерживать фильтрацию по типу")
-    fun testSearchByType() {
-        // Arrange
-        val query = "СтрНайти"
-        val type = "method"
-
-        // Act
-        val result = mcpController.search(query, type = type)
-
-        // Assert
-        assert(result.isNotEmpty()) { "Поиск по типу должен возвращать результат" }
-        assert(!result.contains("❌")) { "Поиск по типу не должен возвращать ошибку для корректного запроса" }
-
-        logger.info { "✅ Поиск по типу работает корректно" }
-    }
-
-    @Test
-    @DisplayName("Инструмент info должен возвращать детальную информацию")
-    fun testInfoTool() {
-        // Arrange
-        val elementName = "СтрНайти"
-
-        // Act
-        val result = mcpController.getInfo(elementName, "method")
-
-        // Assert
-        assert(result.isNotEmpty()) { "Инструмент info должен возвращать результат" }
-        assert(!result.contains("❌")) { "Инструмент info не должен возвращать ошибку для корректного запроса" }
-        assert(result.contains(elementName) || result.contains("не найден")) { "Результат должен содержать информацию об элементе" }
-
-        logger.info { "✅ Инструмент info работает корректно для '$elementName'" }
-    }
-
-    @Test
-    @DisplayName("Инструмент getMember должен возвращать информацию о члене типа")
-    fun testGetMemberTool() {
-        // Arrange
-        val typeName = "ТаблицаЗначений"
-        val memberName = "Колонки"
-
-        // Act
-        val result = mcpController.getMember(typeName, memberName)
-
-        // Assert
-        assert(result.isNotEmpty()) { "Инструмент getMember должен возвращать результат" }
-        assert(!result.contains("❌")) { "Инструмент getMember не должен возвращать ошибку для корректного запроса" }
-
-        logger.info { "✅ Инструмент getMember работает корректно для '$typeName.$memberName'" }
-    }
-
-    @Test
-    @DisplayName("Инструмент getMembers должен возвращать список всех членов типа")
-    fun testGetMembersTool() {
-        // Arrange
-        val typeName = "ТаблицаЗначений"
-
-        // Act
-        val result = mcpController.getMembers(typeName)
-
-        // Assert
-        assert(result.isNotEmpty()) { "Инструмент getMembers должен возвращать результат" }
-        assert(!result.contains("❌")) { "Инструмент getMembers не должен возвращать ошибку для корректного запроса" }
-
-        logger.info { "✅ Инструмент getMembers работает корректно для '$typeName'" }
-    }
-
-    @Test
-    @DisplayName("Инструмент getConstructors должен возвращать список конструкторов")
-    fun testGetConstructorsTool() {
-        // Arrange
-        val typeName = "ТаблицаЗначений"
-
-        // Act
-        val result = mcpController.getConstructors(typeName)
-
-        // Assert
-        assert(result.isNotEmpty()) { "Инструмент getConstructors должен возвращать результат" }
-        assert(!result.contains("❌")) { "Инструмент getConstructors не должен возвращать ошибку для корректного запроса" }
-
-        logger.info { "✅ Инструмент getConstructors работает корректно для '$typeName'" }
-    }
-
-    @Test
-    @DisplayName("MCP сервер должен обрабатывать некорректные запросы gracefully")
-    fun testGracefulErrorHandling() {
-        // Arrange
-        val invalidQueries =
-            listOf(
-                "!@#$%^&*()", // Специальные символы
-                "   ", // Только пробелы
-                "a".repeat(1000), // Очень длинная строка
-            )
-
-        // Act & Assert
-        invalidQueries.forEach { query ->
-            try {
-                val result = mcpController.search(query)
-
-                // Результат может быть пустым, но не должен вызывать исключение
-                assert(result.isNotEmpty()) { "Некорректный запрос должен обрабатываться" }
-                assert(result.contains("❌")) { "✅ Некорректный запрос '$query' вернул ошибку (ожидаемо): $result" }
-            } catch (e: Exception) {
-                logger.warn { "Некорректный запрос '$query' вызвал исключение: ${e.message}" }
-                // Это может быть ожидаемым поведением для некоторых некорректных запросов
-            }
+    @DisplayName("getMembers продолжается по offset")
+    fun getMembersPaginates() {
+        val node = json(mcpController.getMembers("ТаблицаЗначений", limit = 2))
+        assertEquals(2, node["returned"].asInt())
+        if (node["nextOffset"] != null && !node["nextOffset"].isNull) {
+            val next = json(mcpController.getMembers("ТаблицаЗначений", limit = 2, offset = node["nextOffset"].asInt()))
+            assertTrue(next["results"].size() > 0)
         }
     }
 
     @Test
-    @DisplayName("MCP сервер должен поддерживать параллельные запросы")
-    fun testConcurrentRequests() {
-        // Arrange
-        val queries = listOf("Стр", "Справочник", "Код", "Найти")
-
-        // Act
-        val results = queries.map { mcpController.search(it) }
-
-        // Assert
-        results.forEachIndexed { index, result ->
-            assert(result.isNotEmpty()) { "Запрос ${queries[index]} должен обрабатываться" }
-            assert(!result.contains("❌")) { "Запрос ${queries[index]} не должен возвращать ошибку" }
-            logger.debug { "✅ Запрос '${queries[index]}' обработан успешно" }
-        }
-
-        logger.info { "✅ Параллельные запросы обработаны корректно: ${results.size} запросов" }
+    @DisplayName("getConstructors отдаёт конструкторы типа")
+    fun getConstructorsHasItems() {
+        val node = json(mcpController.getConstructors("Структура"))
+        assertTrue(node["total"].asInt() > 0, "у Структуры нет конструкторов: $node")
+        assertTrue(node["results"].first()["syntax"].asText().isNotBlank())
     }
 
     @Test
-    @DisplayName("MCP сервер должен корректно обрабатывать ошибки")
-    fun testErrorHandling() {
-        // Arrange
-        val errorScenarios =
-            listOf(
-                "НесуществующийЭлемент12345" to "Поиск несуществующего элемента",
-                "НекорректныйТип12345" to "Запрос некорректного типа",
-            )
+    @DisplayName("status показывает готовность, версию и инструменты")
+    fun statusShowsCatalog() {
+        val node = json(mcpController.status())
+        assertEquals("ready", node["state"].asText())
+        assertTrue(node["catalog"]["types"].asInt() > 0)
+        assertTrue(node["server"]["tools"].any { it.asText() == "getMember" })
+        assertTrue(node["platform"]["version"].asText().isNotBlank())
+        assertTrue(node["platform"]["path"].asText().endsWith(".hbk"))
+    }
 
-        // Act & Assert
-        errorScenarios.forEach { (query, description) ->
-            val result = mcpController.search(query)
+    @Test
+    @DisplayName("неизвестное имя — ошибка not_found с подсказками")
+    fun unknownNameReturnsHints() {
+        val node = json(mcpController.getInfo("НесуществующийЭлемент12345"))
+        assertEquals("not_found", node["error"]["code"].asText())
+    }
 
-            assert(result.isNotEmpty()) { "$description должен возвращать результат" }
-            assert(result.contains("❌ **Не найдено:** Ничего не найдено")) { "$description должен вернуть ошибку" }
-            assert(result.length > 3) { "Сообщение об ошибке должно содержать описание" }
-        }
-
-        // Тестируем ошибки в инструментах
-        val infoResult = mcpController.getInfo("НесуществующийЭлемент12345", "method")
-        assert(infoResult.contains("❌")) { "Инструмент info должен вернуть ошибку" }
-
-        val memberResult = mcpController.getMember("НесуществующийТип12345", "НесуществующийЧлен12345")
-        assert(infoResult.contains("❌")) { "Инструмент getMember должен вернуть ошибку" }
+    @Test
+    @DisplayName("неизвестный тип — type_not_found")
+    fun unknownTypeReturnsError() {
+        val node = json(mcpController.getMember("НесуществующийТип12345", "Метод"))
+        assertEquals("type_not_found", node["error"]["code"].asText())
     }
 }

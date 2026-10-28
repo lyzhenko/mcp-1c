@@ -32,6 +32,7 @@ gitVersioning.apply {
 }
 
 kotlin {
+    jvmToolchain(17)
     compilerOptions {
         freeCompilerArgs.addAll("-Xjsr305=strict", "-java-parameters", "-Xemit-jvm-type-annotations")
     }
@@ -57,6 +58,7 @@ dependencies {
     implementation(libs.bundles.kotlin)
     implementation("org.apache.commons", "commons-compress", "1.27.1")
     implementation("com.mohamedrejeb.ksoup:ksoup-html:0.6.0")
+    implementation(libs.sqlite.jdbc)
 
     // Spring Boot
     implementation(libs.bundles.spring.boot)

@@ -1,28 +1,26 @@
 spring:
   application:
     name: mcp-bsl-context
-  cache:
-    type: simple
   ai:
     mcp:
       server:
         # Информация о сервере
         name: "1C Platform API Server"
         version: "1.0.0"
-        description: "MCP сервер для поиска по API платформы 1С Предприятие"
-        instructions: "MCP сервер для поиска по API платформы 1С Предприятие. Выполняет поиск по свойствам, методам и типам."
+        description: "MCP-сервер со справкой по API платформы 1С:Предприятие"
+        instructions: >-
+          Справка по платформе 1С:Предприятие: глобальные методы и свойства, типы, перечисления
+          и их члены. Начните с search, уточните карточку через info или getMember,
+          состояние сервера — status.
         type: SYNC
 
         # Возможности сервера
         capabilities:
           tools:
-            # Поддержка инструментов
             enabled: true
           resources:
-            # Поддержка ресурсов (отключено для простоты)
             enabled: false
           prompts:
-            # Поддержка промптов (отключено для простоты)
             enabled: false
   # Отключаем баннер Spring Boot для чистого STDIO вывода
   main:
@@ -31,22 +29,39 @@ spring:
 # Настройки платформы 1С
 platform:
   context:
-    # Путь к каталогу с файлами платформы (содержащий shcntx_ru.hbk)
-    # Можно переопределить через переменную окружения PLATFORM_CONTEXT_PATH
+    # Явный путь: каталог установки, каталог версии или файл shcntx_*.hbk.
+    # Пусто — поиск в стандартных каталогах ОС.
     path: ${PLATFORM_CONTEXT_PATH:}
+    # Дополнительные корни поиска установленных платформ (через запятую)
+    roots: ${PLATFORM_ROOTS:}
+    # Нужная версия: точная или префикс (8.3.27). Пусто — самая свежая.
+    version: ${PLATFORM_VERSION:}
+    # Язык справочных файлов
+    locale: ${PLATFORM_LOCALE:ru}
+    # Каталог дискового кэша разбора; пусто — каталог пользователя
+    cache-dir: ${PLATFORM_CACHE_DIR:}
+    cache-enabled: ${PLATFORM_CACHE_ENABLED:true}
+    refresh: ${PLATFORM_REFRESH:false}
+    # Начинать разбор при старте (false — при первом запросе)
+    warmup: ${PLATFORM_WARMUP:true}
+    # Предел размера ответа инструмента в символах
+    response-limit: ${MCP_RESPONSE_LIMIT:24000}
+    # Сколько инструмент ждёт готовности разбора, прежде чем ответить platform_not_ready
+    wait-timeout-ms: ${PLATFORM_WAIT_TIMEOUT_MS:25000}
+
+# Выгрузка конфигурации (необязательно)
+dump:
+  # Каталог выгрузки «Выгрузить конфигурацию в файлы». Пусто — выгрузка не открыта
+  # до вызова инструмента dumpOpen.
+  path: ${DUMP_PATH:}
+  # Каталог SQLite-индексов; пусто — кэш пользователя
+  index-dir: ${DUMP_INDEX_DIR:}
+  warmup: ${DUMP_WARMUP:true}
+  # Сколько инструмент ждёт готовности индекса
+  wait-timeout-ms: ${DUMP_WAIT_TIMEOUT_MS:60000}
 
 # Настройки логирования
 logging:
   config: classpath:logback-mcp.xml
-  # Все остальные настройки логгирования теперь берутся из logback-mcp.xml
   level:
     root: INFO
-
-# Настройки кэширования
-cache:
-  api-search:
-    expire-after-write: 1h
-  api-info:
-    expire-after-write: 1h
-  caffeine:
-    spec: maximumSize=1000,expireAfterWrite=5m

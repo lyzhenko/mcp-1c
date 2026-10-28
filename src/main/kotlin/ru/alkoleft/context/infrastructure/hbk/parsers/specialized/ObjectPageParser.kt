@@ -95,7 +95,7 @@ class ObjectPageProxyHandler : PageProxyHandler<ObjectInfo>() {
             description = description,
             example = example,
             note = note,
-            relatedObjects = relatedObjects,
+            relatedObjects = relatedObjects?.toList(),
         )
 }
 

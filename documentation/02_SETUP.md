@@ -1,131 +1,148 @@
-# Установка и запуск MCP сервера
+# Установка и запуск
 
 ## Требования
 
-- Java 17+
-- Платформа 1С Предприятие (для загрузки данных API)
+- Java 17+.
+- Установленная платформа 1С:Предприятие 8.3 (нужен `bin/shcntx_ru.hbk`; для английской справки —
+  `shcntx_en.hbk`, если она есть в установке).
 
-## Сборка проекта
-
-```bash
-./gradlew build
-```
-
-## Запуск MCP сервера
-
-### STDIO режим (по умолчанию)
-
-#### Базовый запуск
+## Сборка
 
 ```bash
-java -jar build/libs/mcp-bsl-context.jar --platform-path /path/to/1c/platform
+./gradlew bootJar
+# build/libs/mcp-bsl-context-<версия>.jar
 ```
 
-#### Использование переменных окружения
-
-Вместо передачи параметра `--platform-path` можно задать переменную окружения:
-- `PLATFORM_CONTEXT_PATH` — путь к каталогу установки 1С Предприятия (аналогично `--platform-path`)
-
-Для управления логированием можно задать переменную окружения:
-- `LOG_FILE` — путь к файлу для логов сервера (по умолчанию `mcp-server.log` в рабочей директории)
-
-Пример запуска с переменными окружения:
+## Запуск
 
 ```bash
-PLATFORM_CONTEXT_PATH="/opt/1cv8/x86_64/8.3.25.1257" LOG_FILE="/tmp/mcp-server.log" \
-  java -jar build/libs/mcp-bsl-context.jar
+# платформа в стандартном каталоге — путь можно не указывать
+java -Dfile.encoding=UTF-8 -jar build/libs/mcp-bsl-context-*.jar
+
+# явный путь: каталог установки, каталог версии или сам .hbk
+java -Dfile.encoding=UTF-8 -jar build/libs/mcp-bsl-context-*.jar \
+  --platform-path "C:\Program Files\1cv8\8.3.27.2214"
+
+# конкретная версия и язык
+java -Dfile.encoding=UTF-8 -jar build/libs/mcp-bsl-context-*.jar --version 8.3.27 --locale ru
 ```
 
-### SSE режим (Server-Sent Events)
+## Параметры
 
-#### Базовый запуск
+| Ключ | Значение |
+|---|---|
+| `-p, --platform-path` | каталог установки, каталог версии или файл `shcntx_*.hbk` |
+| `--platform-root` | дополнительный корень поиска платформ (ключ можно повторять) |
+| `--version` | версия: точная (`8.3.27.2214`) или префикс (`8.3.27`) |
+| `--locale` | `ru` (по умолчанию) или `en` |
+| `--cache-dir` | каталог кэша разбора |
+| `--no-cache` | не читать и не писать кэш |
+| `--refresh` | пересобрать кэш из `.hbk` |
+| `--lazy` | начать разбор при первом запросе, а не при старте |
+| `--dump` | каталог выгрузки конфигурации |
+| `--dump-index-dir` | каталог SQLite-индексов выгрузки |
+| `-m, --mode` | `stdio` (по умолчанию) или `sse` |
+| `--port` | порт SSE (по умолчанию 8080) |
+| `-v, --verbose` | отладочное логирование |
+| `--benchmark` | замеры разбора, кэша и поиска, затем выход |
+| `-h, --help` | справка |
+
+## Переменные окружения
+
+| Переменная | Значение |
+|---|---|
+| `PLATFORM_CONTEXT_PATH` | путь к платформе |
+| `PLATFORM_ROOT` | корень поиска платформ |
+| `PLATFORM_VERSION` | нужная версия |
+| `PLATFORM_LOCALE` | язык справки |
+| `PLATFORM_CACHE_DIR` | каталог кэша |
+| `PLATFORM_CACHE_ENABLED` | `false` отключает кэш |
+| `PLATFORM_REFRESH` | `true` — пересобрать кэш |
+| `PLATFORM_WARMUP` | `false` — не разбирать при старте |
+| `MCP_RESPONSE_LIMIT` | предел ответа в символах (по умолчанию 24000) |
+| `PLATFORM_WAIT_TIMEOUT_MS` | ожидание готовности справки (по умолчанию 25000) |
+| `DUMP_PATH` | каталог выгрузки (аналог `--dump`) |
+| `DUMP_INDEX_DIR` | каталог индексов выгрузки |
+| `DUMP_WARMUP` | `false` — не строить индекс при старте |
+| `DUMP_WAIT_TIMEOUT_MS` | ожидание готовности индекса (по умолчанию 60000) |
+| `LOG_FILE` | файл лога (по умолчанию `mcp-server.log`) |
+
+Пример:
 
 ```bash
-java -jar build/libs/mcp-bsl-context.jar --mode sse --platform-path /path/to/1c/platform
+PLATFORM_CONTEXT_PATH="/opt/1cv8/x86_64/8.3.27.2214" \
+PLATFORM_LOCALE=ru \
+LOG_FILE="/tmp/mcp-server.log" \
+java -jar build/libs/mcp-bsl-context.jar
 ```
 
-#### С кастомным портом
+## Кэш
+
+Разобранная модель кэшируется в JSON:
+
+- Windows: `%LOCALAPPDATA%\mcp-bsl-context`
+- Linux: `~/.cache/mcp-bsl-context`
+- macOS: `~/Library/Caches/mcp-bsl-context`
+
+Кэш привязан к пути, размеру и времени изменения `.hbk`, языку и версии схемы. После обновления
+платформы он пересобирается сам; `--refresh` форсирует пересборку, `--no-cache` отключает кэш.
+В `status` видно файл и его размер.
+
+## Индекс выгрузки
+
+Индекс выгрузки — отдельная SQLite-база, файлы выгрузки не меняются:
+
+- Windows: `%LOCALAPPDATA%\mcp-bsl-context\dumps\dump-<hash>.db`
+- Linux/macOS: в каталоге кэша пользователя, подкаталог `dumps`
+
+Путь задаётся `--dump-index-dir` или `DUMP_INDEX_DIR`. Индекс строится при первом открытии выгрузки
+(6,1 ГБ — около 15 секунд), затем открывается за доли секунды. Схема версионирована: при обновлении
+сервера индекс пересобирается сам. После правок файлов на диске вызовите `dumpReload`.
+
+## SSE
 
 ```bash
-java -jar build/libs/mcp-bsl-context.jar --mode sse --port 9000 --platform-path /path/to/1c/platform
+java -jar build/libs/mcp-bsl-context.jar --mode sse --port 9000 --platform-path "/opt/1cv8/x86_64/8.3.27.2214"
 ```
 
-#### Переменные окружения для SSE
-
-```bash
-# Настройка через переменные окружения
-export PLATFORM_CONTEXT_PATH="/path/to/1c/platform"
-export SSE_PORT=8080
-java -jar build/libs/mcp-bsl-context.jar --mode sse
-```
-
-### Параметры запуска
-
-- `--platform-path` - путь к каталогу установки 1С Предприятия
-- `--mode` - режим работы (`stdio` или `sse`, по умолчанию `stdio`)
-- `--port` - порт для SSE режима (по умолчанию 8080)
-- `--verbose` - включить отладочное логирование
-- `--help` - показать справку
-
-### Пример запуска с отладкой
-
-```bash
-# STDIO режим
-java -jar build/libs/mcp-bsl-context.jar \
-  --platform-path "/opt/1cv8/x86_64/8.3.25.1257" \
-  --verbose
-
-# SSE режим
-java -jar build/libs/mcp-bsl-context.jar \
-  --mode sse \
-  --platform-path "/opt/1cv8/x86_64/8.3.25.1257" \
-  --port 9000 \
-  --verbose
-```
+Подключение: `http://localhost:9000/mcp/sse`. Подробнее — [SSE_USAGE.md](SSE_USAGE.md).
 
 ## Логирование
 
-- **Рабочие логи** - `mcp-server.log` (автоматическая ротация)
-- **Отладочные сообщения** - stderr (не мешает MCP протоколу)
-- **JSON-RPC коммуникация** - через stdout/stdin (STDIO режим)
-- **HTTP логи** - в консоли и файле (SSE режим)
+- Файл `mcp-server.log` с ротацией (10 МБ, 5 файлов); путь — `LOG_FILE`.
+- stdout в stdio-режиме целиком принадлежит протоколу, поэтому логи в него не пишутся.
+- `--verbose` включает DEBUG.
 
-## Устранение неполадок
+## Диагностика
 
-### Сервер не запускается
-1. Проверьте корректность пути к платформе 1С
-2. Убедитесь что Java 17+ установлена
-3. Проверьте логи в `mcp-server.log`
-4. В SSE режиме проверьте доступность порта
+### Сервер не находит платформу
 
-### MCP клиент не видит tools
-1. Убедитесь что сервер полностью загрузился
-2. Проверьте совместимость версий MCP протокола
-3. Включите отладочное логирование (`--verbose`)
+1. Проверьте, что в каталоге версии есть `bin/shcntx_ru.hbk` (или `shcntx_en.hbk`).
+2. Укажите путь явно: `--platform-path "<каталог версии>"`.
+3. `status` показывает `availablePlatforms` — какие версии и языки нашлись.
 
-### SSE соединение не устанавливается
-1. Проверьте что сервер запущен в SSE режиме (`--mode sse`)
-2. Убедитесь что порт не занят другими приложениями
-3. Проверьте сетевые настройки и firewall
+### Инструменты отвечают `platform_not_ready` или `dump_not_ready`
 
-### Медленный поиск
-1. Поиск индексируется при запуске - дождитесь завершения
-2. При большом объеме данных увеличьте heap size JVM
-3. Результаты кэшируются автоматически
+Справка разбирается около 2 секунд (из кэша — доли секунды), индекс выгрузки 6,1 ГБ — около
+15 секунд. Если состояние `failed`, причина указана в `status.error`; чаще всего это неверный путь
+или повреждённый файл.
 
-## Техническая поддержка
+### `dump_not_open`
 
-- **Версия MCP протокола** - 2024-11-05
-- **Версия Spring AI** - 1.0.0
-- **Минимальная версия Java** - 17
-- **Поддерживаемые ОС** - Linux, macOS, Windows
-- **Поддерживаемые транспорты** - STDIO, HTTP/SSE
+Выгрузка не задана: передайте `--dump "<каталог>"` или вызовите `dumpOpen` с путём.
 
-### Полезные ссылки
-- [Репозиторий проекта](https://github.com/alkoleft/mcp-bsl-context)
-- [GitHub Container Registry](https://github.com/alkoleft/mcp-bsl-context/pkgs/container/mcp-bsl-context)
-- [Релизы](https://github.com/alkoleft/mcp-bsl-context/releases)
-- [SSE документация](SSE_USAGE.md)
+### Ответ обрезан
 
-Для сообщения об ошибках создайте issue в репозитории проекта.
-Для сообщения об ошибках создайте issue в репозитории проекта.
+Увеличьте `MCP_RESPONSE_LIMIT` или используйте `offset`/`limit`. Поле `nextOffset` показывает,
+с какого места продолжить.
+
+### SSE не подключается
+
+Проверьте `--mode sse`, порт и firewall. Порт по умолчанию — 8080.
+
+## Совместимость
+
+- MCP-протокол: 2024-11-05 (Spring AI MCP Server 1.0.0).
+- Java 17+.
+- ОС: Windows, Linux, macOS (пути поиска платформы различаются).
+- Транспорты: stdio, HTTP/SSE.

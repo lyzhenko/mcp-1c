@@ -8,7 +8,6 @@
 package ru.alkoleft.context.infrastructure.hbk.parsers.specialized
 
 import ru.alkoleft.context.infrastructure.hbk.exceptions.HandlerProcessingNotImplemented
-import ru.alkoleft.context.infrastructure.hbk.exceptions.UnknownPageBlockType
 import ru.alkoleft.context.infrastructure.hbk.models.PropertyInfo
 import ru.alkoleft.context.infrastructure.hbk.models.RelatedObject
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.BlockHandler
@@ -18,6 +17,7 @@ import ru.alkoleft.context.infrastructure.hbk.parsers.core.PageParser
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.PageProxyHandler
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.ReadOnlyBlockHandler
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.RelatedObjectsBlockHandler
+import ru.alkoleft.context.infrastructure.hbk.parsers.core.UnknownBlocks
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.ValueInfoBlockHandler
 
 /**
@@ -59,7 +59,7 @@ class PropertyPageProxyHandler : PageProxyHandler<PropertyInfo>() {
             "См. также:" -> RelatedObjectsBlockHandler()
             "Примечание:" -> NoteBlockHandler()
             "Доступность:", "Использование в версии:", "Использование в интерфейсе:" -> null
-            else -> throw UnknownPageBlockType(blockTitle)
+            else -> UnknownBlocks.skip(blockTitle)
         }
 
     override fun onBlockFinished(handler: BlockHandler<*>) {
@@ -90,7 +90,7 @@ class PropertyPageProxyHandler : PageProxyHandler<PropertyInfo>() {
             description = description.trim(),
             readonly = readonly,
             typeName = typeNames,
-            relatedObjects = relatedObjects,
+            relatedObjects = relatedObjects?.toList(),
             note = note,
         )
 

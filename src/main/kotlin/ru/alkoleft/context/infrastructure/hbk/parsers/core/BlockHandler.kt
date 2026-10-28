@@ -490,7 +490,8 @@ class RelatedObjectsBlockHandler : BaseBlockHandler<List<RelatedObject>>() {
         linkText.append(text)
     }
 
-    override fun getResult(): List<RelatedObject> = relatedObjects
+    // Копия обязательна: список очищается при разборе следующей страницы.
+    override fun getResult(): List<RelatedObject> = relatedObjects.toList()
 
     override fun cleanState() {
         relatedObjects.clear()

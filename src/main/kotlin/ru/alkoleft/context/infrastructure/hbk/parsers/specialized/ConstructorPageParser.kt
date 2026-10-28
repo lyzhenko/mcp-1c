@@ -8,7 +8,6 @@
 package ru.alkoleft.context.infrastructure.hbk.parsers.specialized
 
 import ru.alkoleft.context.infrastructure.hbk.exceptions.HandlerProcessingNotImplemented
-import ru.alkoleft.context.infrastructure.hbk.exceptions.UnknownPageBlockType
 import ru.alkoleft.context.infrastructure.hbk.models.ConstructorInfo
 import ru.alkoleft.context.infrastructure.hbk.models.MethodParameterInfo
 import ru.alkoleft.context.infrastructure.hbk.models.RelatedObject
@@ -22,6 +21,7 @@ import ru.alkoleft.context.infrastructure.hbk.parsers.core.PageProxyHandler
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.ParametersBlockHandler
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.RelatedObjectsBlockHandler
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.SyntaxBlockHandler
+import ru.alkoleft.context.infrastructure.hbk.parsers.core.UnknownBlocks
 
 /**
  * Обработчик для парсинга страниц конструкторов объектов платформы 1С:Предприятие.
@@ -59,7 +59,7 @@ class ConstructorPageProxyHandler : PageProxyHandler<ConstructorInfo>() {
             "См. также:" -> RelatedObjectsBlockHandler()
             "Примечание:" -> NoteBlockHandler()
             "Доступность:", "Использование в версии:", "Использование в интерфейсе:" -> null
-            else -> throw UnknownPageBlockType(blockTitle)
+            else -> UnknownBlocks.skip(blockTitle)
         }
 
     override fun onBlockFinished(handler: BlockHandler<*>) {
@@ -85,7 +85,7 @@ class ConstructorPageProxyHandler : PageProxyHandler<ConstructorInfo>() {
             description = description.trim(),
             example = example,
             note = note,
-            relatedObjects = relatedObjects,
+            relatedObjects = relatedObjects?.toList(),
         )
 
     override fun clean() {

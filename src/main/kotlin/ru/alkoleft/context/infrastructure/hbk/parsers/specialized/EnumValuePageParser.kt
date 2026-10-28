@@ -8,7 +8,6 @@
 package ru.alkoleft.context.infrastructure.hbk.parsers.specialized
 
 import ru.alkoleft.context.infrastructure.hbk.exceptions.HandlerProcessingNotImplemented
-import ru.alkoleft.context.infrastructure.hbk.exceptions.UnknownPageBlockType
 import ru.alkoleft.context.infrastructure.hbk.models.EnumValueInfo
 import ru.alkoleft.context.infrastructure.hbk.models.RelatedObject
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.BlockHandler
@@ -17,6 +16,7 @@ import ru.alkoleft.context.infrastructure.hbk.parsers.core.NameBlockHandler
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.PageParser
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.PageProxyHandler
 import ru.alkoleft.context.infrastructure.hbk.parsers.core.RelatedObjectsBlockHandler
+import ru.alkoleft.context.infrastructure.hbk.parsers.core.UnknownBlocks
 
 /**
  * Обработчик для парсинга страниц значений перечислений платформы 1С:Предприятие.
@@ -55,7 +55,9 @@ class EnumValuePageParseHandler : PageProxyHandler<EnumValueInfo>() {
             "Описание:" -> DescriptionBlockHandler()
             "См. также:" -> RelatedObjectsBlockHandler()
             "Доступность:", "Использование в версии:", "Использование в интерфейсе:" -> null
-            else -> throw UnknownPageBlockType(blockTitle)
+            // Заметка значения перечисления в модели не хранится — пропускаем молча.
+            "Примечание:" -> null
+            else -> UnknownBlocks.skip(blockTitle)
         }
 
     override fun onBlockFinished(handler: BlockHandler<*>) {
@@ -77,7 +79,7 @@ class EnumValuePageParseHandler : PageProxyHandler<EnumValueInfo>() {
             nameRu = nameRu,
             nameEn = nameEn,
             description = description,
-            relatedObjects = relatedObjects,
+            relatedObjects = relatedObjects?.toList(),
         )
 }
 

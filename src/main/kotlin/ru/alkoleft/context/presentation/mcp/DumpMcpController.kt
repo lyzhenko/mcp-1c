@@ -1,0 +1,204 @@
+/*
+ * Copyright (c) 2025 alkoleft. All rights reserved.
+ * This file is part of the mcp-bsl-platform-context project.
+ *
+ * Licensed under the MIT License. See LICENSE file in the project root for full license information.
+ */
+
+package ru.alkoleft.context.presentation.mcp
+
+import io.github.oshai.kotlinlogging.KotlinLogging
+import org.springframework.ai.tool.annotation.Tool
+import org.springframework.ai.tool.annotation.ToolParam
+import org.springframework.stereotype.Service
+import ru.alkoleft.context.business.services.DumpService
+import ru.alkoleft.context.exceptions.DefinitionNotFoundException
+import ru.alkoleft.context.exceptions.DomainException
+import ru.alkoleft.context.exceptions.DumpNotOpenException
+import ru.alkoleft.context.exceptions.DumpNotReadyException
+import ru.alkoleft.context.exceptions.InvalidSearchQueryException
+import ru.alkoleft.context.presentation.formatters.DumpJsonService
+
+private val logger = KotlinLogging.logger {}
+
+/**
+ * Инструменты разбора выгрузки конфигурации 1С.
+ *
+ * Работают только с выгрузкой («Выгрузить конфигурацию в файлы»), которую открывает `dumpOpen`
+ * или ключ `--dump`. Поиск, карточка объекта, код модулей и grep отвечают JSON; ошибки приходят
+ * ответом с `error.code`, как и у инструментов справки.
+ */
+@Service
+class DumpMcpController(
+    private val dumpService: DumpService,
+    private val formatter: DumpJsonService,
+) {
+    @Tool(
+        name = "dumpOpen",
+        description =
+            "Открыть выгрузку конфигурации 1С (формат «Выгрузить конфигурацию в файлы») и построить " +
+                "индекс. Повторный вызов с тем же путём переиспользует готовый индекс. Возвращает " +
+                "состояние индекса: объекты, модули, процедуры, время сборки.",
+        resultConverter = RawJsonResultConverter::class,
+    )
+    fun dumpOpen(
+        @ToolParam(description = "Каталог выгрузки, в котором лежит Configuration.xml.")
+        path: String,
+    ): String =
+        respond("dumpOpen") {
+            formatter.statusJson(dumpService.open(path))
+        }
+
+    @Tool(
+        name = "dumpSearch",
+        description =
+            "Поиск по выгрузке: объекты метаданных, их реквизиты и процедуры модулей. " +
+                "Возвращает имя, владельца (owner) и путь; карточка объекта — dumpMetadata.",
+        resultConverter = RawJsonResultConverter::class,
+    )
+    fun dumpSearch(
+        @ToolParam(description = "Имя или его часть: «РеализацияТоваровУслуг», «Сумма», «ПередЗаписью».")
+        query: String,
+        @ToolParam(
+            description =
+                "Что искать: object — все объекты, routine — процедуры, field — реквизиты, " +
+                    "или вид объекта: Catalog, Document, CommonModule и т. п.",
+            required = false,
+        )
+        kind: String? = null,
+        @ToolParam(description = "Сколько результатов вернуть: 1–100, по умолчанию 20.", required = false)
+        limit: Int? = null,
+        @ToolParam(description = "Сколько совпадений пропустить — для следующей страницы.", required = false)
+        offset: Int? = null,
+    ): String =
+        respond("dumpSearch") {
+            formatter.search(dumpService.search(query, kind, limit, offset))
+        }
+
+    @Tool(
+        name = "dumpMetadata",
+        description =
+            "Карточка объекта метаданных: реквизиты, табличные части с реквизитами, формы, команды, " +
+                "значения перечисления и модули с процедурами.",
+        resultConverter = RawJsonResultConverter::class,
+    )
+    fun dumpMetadata(
+        @ToolParam(description = "Ссылка «Catalog.РеализацияТоваровУслуг» или имя объекта.")
+        ref: String,
+        @ToolParam(description = "Сколько реквизитов показать: 1–500, по умолчанию 200.", required = false)
+        limit: Int? = null,
+    ): String =
+        respond("dumpMetadata") {
+            formatter.metadata(dumpService.metadata(ref, limit))
+        }
+
+    @Tool(
+        name = "dumpCode",
+        description =
+            "Текст модуля BSL с номерами строк. Укажите path (путь модуля из dumpMetadata) " +
+                "или id модуля. Продолжение — from/to.",
+        resultConverter = RawJsonResultConverter::class,
+    )
+    fun dumpCode(
+        @ToolParam(
+            description = "Путь модуля относительно выгрузки, например CommonModules/ОбщегоНазначения/Ext/Module.bsl.",
+            required = false,
+        )
+        path: String? = null,
+        @ToolParam(description = "Идентификатор модуля из dumpMetadata, если путь неизвестен.", required = false)
+        id: Long? = null,
+        @ToolParam(description = "Первая строка, по умолчанию 1.", required = false)
+        from: Int? = null,
+        @ToolParam(description = "Последняя строка; по умолчанию до 2000 строк от from.", required = false)
+        to: Int? = null,
+    ): String =
+        respond("dumpCode") {
+            formatter.code(dumpService.code(path, id, from, to))
+        }
+
+    @Tool(
+        name = "dumpGrep",
+        description =
+            "Поиск по тексту файлов выгрузки: подстрока или регулярное выражение, с объектом-владельцем " +
+                "и процедурой. По умолчанию ищет только в модулях .bsl и ограничен по времени.",
+        resultConverter = RawJsonResultConverter::class,
+    )
+    fun dumpGrep(
+        @ToolParam(description = "Шаблон: подстрока или регулярное выражение при regex=true.")
+        pattern: String,
+        @ToolParam(description = "Считать pattern регулярным выражением.", required = false)
+        regex: Boolean? = null,
+        @ToolParam(description = "Не учитывать регистр (по умолчанию да).", required = false)
+        ignoreCase: Boolean? = null,
+        @ToolParam(description = "Расширения файлов через запятую: bsl, xml. По умолчанию bsl.", required = false)
+        extensions: String? = null,
+        @ToolParam(description = "Ограничить поиск путями внутри выгрузки, например Catalogs/ (через запятую).", required = false)
+        paths: String? = null,
+        @ToolParam(description = "Сколько строк контекста вокруг совпадения: 0–5.", required = false)
+        context: Int? = null,
+        @ToolParam(description = "Сколько совпадений вернуть: 1–200, по умолчанию 50.", required = false)
+        limit: Int? = null,
+        @ToolParam(description = "Бюджет поиска в миллисекундах: 100–120000, по умолчанию 8000.", required = false)
+        deadlineMs: Long? = null,
+    ): String =
+        respond("dumpGrep") {
+            formatter.grep(
+                dumpService.grep(
+                    pattern = pattern,
+                    regex = regex ?: false,
+                    ignoreCase = ignoreCase ?: true,
+                    extensions = extensions?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() },
+                    paths = paths?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() },
+                    context = context ?: 0,
+                    limit = limit ?: 50,
+                    deadlineMs = deadlineMs ?: 8_000,
+                ),
+            )
+        }
+
+    @Tool(
+        name = "dumpReload",
+        description =
+            "Перестроить индекс выгрузки: вызовите после изменения файлов на диске. " +
+                "Возвращает состояние индекса и время сборки.",
+        resultConverter = RawJsonResultConverter::class,
+    )
+    fun dumpReload(): String =
+        respond("dumpReload") {
+            formatter.statusJson(dumpService.reload())
+        }
+
+    private fun respond(
+        tool: String,
+        block: () -> String,
+    ): String =
+        try {
+            block()
+        } catch (error: Throwable) {
+            failure(tool, error)
+        }
+
+    private fun failure(
+        tool: String,
+        error: Throwable,
+    ): String =
+        when (error) {
+            is DumpNotOpenException -> formatter.error("dump_not_open", error.message ?: "Выгрузка не открыта")
+
+            is DumpNotReadyException -> formatter.error("dump_not_ready", error.message ?: "Индекс выгрузки не готов")
+
+            is DefinitionNotFoundException -> formatter.error("not_found", error.message ?: "Объект не найден")
+
+            is InvalidSearchQueryException -> formatter.error("invalid_request", error.message ?: "Невалидный запрос")
+
+            is DomainException -> formatter.error("error", error.message ?: "Ошибка запроса")
+
+            else -> {
+                logger.error(error) { "Ошибка инструмента $tool" }
+                formatter.error(
+                    "internal",
+                    "Внутренняя ошибка сервера: ${error.message ?: error.javaClass.simpleName}",
+                )
+            }
+        }
+}

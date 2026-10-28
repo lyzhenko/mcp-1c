@@ -8,3 +8,6 @@ logging:
 platform:
   context:
     path: ${PLATFORM_CONTEXT_PATH:/opt/1cv8/x86_64/8.3.27.1326}
+    # Тесты не должны зависеть от чужого кэша и ждать разбор столько же, сколько сервер
+    cache-enabled: false
+    wait-timeout-ms: 180000

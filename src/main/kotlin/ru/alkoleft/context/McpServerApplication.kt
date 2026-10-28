@@ -1,75 +1,50 @@
 /*
  * Copyright (c) 2024-2025 alkoleft. All rights reserved.
- * This file is part of the mcp-bsl-context project.
+ * This file is part of the mcp-bsl-platform-context project.
  *
  * Licensed under the MIT License. See LICENSE file in the project root for full license information.
  */
 
 package ru.alkoleft.context
 
-import kotlinx.cli.ArgParser
-import kotlinx.cli.ArgType
-import kotlinx.cli.default
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
+import ru.alkoleft.context.presentation.benchmark.PlatformBenchmark
+import ru.alkoleft.context.presentation.cli.ServerMode
+import ru.alkoleft.context.presentation.cli.ServerOptions
+import kotlin.system.exitProcess
 
 @SpringBootApplication
 class McpServerApplication
 
 fun main(args: Array<String>) {
-    val parser = ArgParser("mcp-bsl-context")
-
-    val platformPath by parser.option(
-        ArgType.String,
-        shortName = "p",
-        fullName = "platform-path",
-        description = "Путь к каталогу платформы 1С",
-    )
-    val verbose by parser.option(
-        ArgType.Boolean,
-        shortName = "v",
-        fullName = "verbose",
-        description = "Включить отладочное логирование",
-    )
-    val mode by parser
-        .option(
-            ArgType.Choice(listOf("sse", "stdio"), { it }),
-            shortName = "m",
-            fullName = "mode",
-            description = "Режим работы: sse (HTTP Server-Sent Events) или stdio (стандартный ввод/вывод)",
-        ).default("stdio")
-    val ssePort by parser.option(
-        ArgType.Int,
-        fullName = "port",
-        description = "Порт для SSE сервера (по умолчанию 8080)",
-    )
-
-    parser.parse(args)
-
-    // Настройка пути к платформе
-    if (!platformPath.isNullOrBlank()) {
-        System.setProperty("platform.context.path", platformPath as String)
+    val parsed = ServerOptions.parse(args)
+    if (parsed.help) {
+        println(ServerOptions.USAGE)
+        return
+    }
+    parsed.error?.let { message ->
+        System.err.println("Ошибка аргументов: $message")
+        System.err.println(ServerOptions.USAGE)
+        exitProcess(2)
     }
 
-    // Настройка логирования
-    if (verbose ?: false) {
-        System.setProperty("logging.level.root", "DEBUG")
+    val options = parsed.options ?: return
+    options.applyToSystemProperties()
+
+    if (options.benchmark) {
+        PlatformBenchmark(options.toPlatformOptions()).run()
+        return
     }
 
-    // Настройка режима работы
     val activeProfiles = mutableListOf<String>()
-
-    when (mode) {
-        "sse" -> {
-            activeProfiles.add("sse")
-            if (ssePort != null) {
-                System.setProperty("server.port", ssePort.toString())
-            }
+    when (options.mode) {
+        ServerMode.SSE -> {
+            activeProfiles += "sse"
+            options.port?.let { System.setProperty("server.port", it.toString()) }
         }
 
-        "stdio" -> {
-            activeProfiles.add("stdio")
-        }
+        ServerMode.STDIO -> activeProfiles += "stdio"
     }
 
     runApplication<McpServerApplication>(*args) {

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2024-2025 alkoleft. All rights reserved.
- * This file is part of the mcp-bsl-context project.
+ * This file is part of the mcp-bsl-platform-context project.
  *
  * Licensed under the MIT License. See LICENSE file in the project root for full license information.
  */
@@ -8,103 +8,142 @@
 package ru.alkoleft.context.infrastructure.persistent.storage
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import ru.alkoleft.context.business.entities.EnumDefinition
+import ru.alkoleft.context.business.entities.MethodDefinition
+import ru.alkoleft.context.business.entities.PlatformContextData
+import ru.alkoleft.context.business.entities.PlatformSourceInfo
+import ru.alkoleft.context.business.entities.PlatformTypeDefinition
+import ru.alkoleft.context.business.entities.PropertyDefinition
 import ru.alkoleft.context.exceptions.PlatformContextLoadException
 import ru.alkoleft.context.infrastructure.hbk.PlatformContextReader
-import ru.alkoleft.context.infrastructure.hbk.PlatformContextReader.Context
-import java.io.FileNotFoundException
+import ru.alkoleft.context.infrastructure.persistent.cache.PlatformCache
+import ru.alkoleft.context.infrastructure.platform.LocatedPlatform
+import ru.alkoleft.context.infrastructure.platform.PlatformLocator
+import ru.alkoleft.context.infrastructure.platform.PlatformOptions
 import java.nio.file.Files
 import java.nio.file.Path
 
+private val logger = KotlinLogging.logger {}
+
 /**
- * Infrastructure External Service: Загрузчик контекста платформы 1С
+ * Результат загрузки модели платформы.
  *
- * Адаптер для работы с HBK библиотекой для загрузки контекста платформы
+ * @property fromCache модель прочитана из кэша, а не разобрана заново
+ * @property loadMillis сколько заняла загрузка (разбор или чтение кэша)
+ * @property cacheFile файл кэша, если кэш включён
  */
-private val log = KotlinLogging.logger { }
+data class PlatformLoadResult(
+    val data: PlatformContextData,
+    val located: LocatedPlatform,
+    val fromCache: Boolean,
+    val loadMillis: Long,
+    val cacheFile: Path? = null,
+)
 
-class PlatformContextLoader {
-    companion object {
-        private const val CONTEXT_FILE_NAME = "shcntx_ru.hbk"
+/**
+ * Загрузчик модели платформы: находит `.hbk`, проверяет кэш, при промахе разбирает справку.
+ */
+class PlatformContextLoader(
+    private val locator: PlatformLocator,
+    private val cache: PlatformCache?,
+) {
+    fun load(options: PlatformOptions): PlatformLoadResult {
+        val located =
+            locator.locate(options) ?: throw PlatformContextLoadException(
+                buildString {
+                    append("Не найдена установленная платформа 1С")
+                    options.path?.takeIf { it.isNotBlank() }?.let { append(" по пути «$it»") }
+                    append(". Укажите каталог установки ключом --platform-path ")
+                    append("или положите справку shcntx_${options.normalizedLocale()}.hbk в стандартный каталог.")
+                },
+            )
+
+        val hbk = located.hbk
+        val stat =
+            runCatching { Files.readAttributes(hbk, java.nio.file.attribute.BasicFileAttributes::class.java) }
+                .getOrElse { throw PlatformContextLoadException("Не удалось прочитать файл справки «$hbk»: ${it.message}", it) }
+
+        val key =
+            PlatformCache.Key(
+                source = hbk.toAbsolutePath().normalize(),
+                size = stat.size(),
+                modified = stat.lastModifiedTime().toMillis(),
+                locale = located.locale,
+                version = located.version,
+            )
+        val cacheFile = cache?.fileFor(key)
+
+        if (cache != null && !options.refresh) {
+            val cacheStarted = System.currentTimeMillis()
+            val cached = cache.load(key)
+            if (cached != null) {
+                return PlatformLoadResult(
+                    data = cached,
+                    located = located,
+                    fromCache = true,
+                    loadMillis = System.currentTimeMillis() - cacheStarted,
+                    cacheFile = cacheFile,
+                )
+            }
+        }
+
+        val started = System.currentTimeMillis()
+        val data = parse(located, stat.size(), stat.lastModifiedTime().toMillis())
+        val elapsed = System.currentTimeMillis() - started
+        val complete = data.copy(info = data.info.copy(parseMillis = elapsed, loadedAt = System.currentTimeMillis()))
+        if (cache != null) {
+            cache.save(key, complete)
+        }
+        if (located.localeFallback) {
+            logger.warn { "Справка на запрошенном языке не найдена, используется '${located.locale}'" }
+        }
+        logger.info {
+            "Платформа ${located.version} (${located.locale}) разобрана за $elapsed мс: " +
+                "типов ${complete.types.size}, методов ${complete.methods.size}, " +
+                "свойств ${complete.properties.size}, перечислений ${complete.enums.size}"
+        }
+        return PlatformLoadResult(complete, located, fromCache = false, loadMillis = elapsed, cacheFile = cacheFile)
     }
 
-    /**
-     * Загружает контекст платформы из указанного пути
-     *
-     * @param platformPath путь к каталогу с файлами платформы
-     * @return провайдер контекста платформы
-     * @throws FileNotFoundException если файл контекста не найден
-     * @throws RuntimeException если не удалось загрузить контекст
-     */
-    fun loadPlatformContext(
-        platformPath: Path,
-        block: Context.() -> Unit,
-    ) {
-        log.info { "${"Загрузка контекста платформы из каталога '{}'"} $platformPath" }
-
-        val syntaxContextFile =
-            findContextFile(platformPath)
-                ?: throw FileNotFoundException("Не удалось найти файл $CONTEXT_FILE_NAME в каталоге $platformPath")
-
-        log.info { "Найден файл контекста: $syntaxContextFile" }
+    private fun parse(
+        located: LocatedPlatform,
+        sizeBytes: Long,
+        modifiedAt: Long,
+    ): PlatformContextData {
+        val methods = mutableListOf<MethodDefinition>()
+        val properties = mutableListOf<PropertyDefinition>()
+        val types = mutableListOf<PlatformTypeDefinition>()
+        val enums = mutableListOf<EnumDefinition>()
 
         try {
-            val reader = PlatformContextReader()
-            reader.read(syntaxContextFile, block).also {
-                log.info { "Контекст платформы успешно загружен" }
+            PlatformContextReader().read(located.hbk) {
+                methods += globalMethods().map { it.toEntity(isGlobal = true) }
+                properties += globalProperties().map { it.toEntity() }
+                types += types().map { it.toEntity() }
+                enums += enums().map { it.toEntity() }
             }
-        } catch (e: Exception) {
-            log.error(e) { "Ошибка при загрузке контекста платформы" }
-            throw PlatformContextLoadException("Не удалось загрузить контекст платформы: ${e.message}", e)
-        }
-    }
-
-    /**
-     * Ищет файл контекста в указанном каталоге
-     */
-    private fun findContextFile(path: Path): Path? =
-        runCatching {
-            Files.walk(path).use { stream ->
-                stream
-                    .filter { Files.isRegularFile(it) }
-                    .filter { it.fileName.toString() == CONTEXT_FILE_NAME }
-                    .findFirst()
-                    .orElse(null)
-            }
-        }.getOrElse { e ->
-            log.warn(e) { "Ошибка при поиске файла контекста в $path" }
-            null
+        } catch (error: Exception) {
+            logger.error(error) { "Ошибка разбора справки платформы" }
+            throw PlatformContextLoadException(
+                "Не удалось разобрать справку «${located.hbk}»: ${error.message}. " +
+                    "Удалите кэш и повторите; если ошибка повторяется — пришлите файл справки.",
+                error,
+            )
         }
 
-    /**
-     * Extension function для автоматической очистки временного каталога
-     */
-    private inline fun <T> Path.use(block: (Path) -> T): T =
-        try {
-            block(this)
-        } finally {
-            cleanupTempDirectory(this)
-        }
-
-    /**
-     * Очищает временный каталог с улучшенной обработкой ошибок
-     */
-    private fun cleanupTempDirectory(tmpDir: Path) {
-        runCatching {
-            if (Files.exists(tmpDir)) {
-                Files.walk(tmpDir).use { stream ->
-                    stream
-                        .sorted { a, b -> b.compareTo(a) } // Удаляем файлы перед каталогами
-                        .forEach { path ->
-                            runCatching {
-                                Files.deleteIfExists(path)
-                            }.onFailure { e ->
-                                log.warn { "Не удалось удалить временный файл: $path\n${e.message}" }
-                            }
-                        }
-                }
-            }
-        }.onFailure { e ->
-            log.warn { "${"Ошибка при очистке временного каталога: {}"} $tmpDir $e" }
-        }
+        return PlatformContextData(
+            methods = methods,
+            properties = properties,
+            types = types,
+            enums = enums,
+            info =
+                PlatformSourceInfo(
+                    version = located.version,
+                    locale = located.locale,
+                    path = located.hbk.toString(),
+                    sizeBytes = sizeBytes,
+                    modifiedAt = modifiedAt,
+                ),
+        )
     }
 }

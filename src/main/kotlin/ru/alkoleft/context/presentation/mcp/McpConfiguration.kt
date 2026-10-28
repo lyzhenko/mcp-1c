@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2025 alkoleft. All rights reserved.
- * This file is part of the mcp-bsl-context project.
+ * This file is part of the mcp-bsl-platform-context project.
  *
  * Licensed under the MIT License. See LICENSE file in the project root for full license information.
  */
@@ -15,9 +15,12 @@ import org.springframework.context.annotation.Configuration
 @Configuration
 class McpConfiguration {
     @Bean
-    fun platformTools(platformMcp: PlatformContextMcpController): ToolCallbackProvider =
+    fun platformTools(
+        platformMcp: PlatformContextMcpController,
+        dumpMcp: DumpMcpController,
+    ): ToolCallbackProvider =
         MethodToolCallbackProvider
             .builder()
-            .toolObjects(platformMcp)
+            .toolObjects(platformMcp, dumpMcp)
             .build()
 }
