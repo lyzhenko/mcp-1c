@@ -173,6 +173,8 @@ class DumpService(
                 DumpModuleCard(module, routines.take(MAX_ROUTINES), routines.size)
             }
 
+        val usages = runCatching { index.usageSummary(obj.name, collectionsForKind(obj.kind)) }.getOrNull()
+
         return DumpMetadataCard(
             obj = obj,
             attributes = attributes,
@@ -184,6 +186,36 @@ class DumpService(
             modules = modules,
             totalFields = fields.size,
             truncated = fields.size > limit || modules.any { it.routinesTotal > MAX_ROUTINES },
+            usages = usages,
+        )
+    }
+
+    /** Точки входа: обработчики форм, подписки, задания, HTTP/веб-сервисы. */
+    fun entrypoints(
+        kind: String? = null,
+        metadata: String? = null,
+        limit: Int? = null,
+    ): EntryPointPage {
+        val index = requireIndex()
+        val safeLimit = (limit ?: DEFAULT_ENTRYPOINTS).coerceIn(1, MAX_ENTRYPOINTS)
+        val rows = index.entrypoints(kind?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }, metadata?.trim(), safeLimit)
+        return EntryPointPage(
+            kind = kind,
+            metadata = metadata,
+            total = rows.size,
+            items =
+                rows.map {
+                    DumpEntryPoint(
+                        kind = it.kind,
+                        name = it.name,
+                        owner = it.owner,
+                        handler = it.handler,
+                        event = it.event,
+                        path = it.path,
+                        sources = it.sources,
+                    )
+                },
+            counts = index.entrypointCounts(),
         )
     }
 
@@ -446,6 +478,28 @@ class DumpService(
         return previous[right.length]
     }
 
+    private fun collectionsForKind(kind: String): List<String> =
+        when (kind) {
+            "Catalog" -> listOf("Справочники", "Справочник")
+            "Document" -> listOf("Документы", "Документ")
+            "InformationRegister" -> listOf("РегистрыСведений", "РегистрСведений")
+            "AccumulationRegister" -> listOf("РегистрыНакопления", "РегистрНакопления")
+            "AccountingRegister" -> listOf("РегистрыБухгалтерии", "РегистрБухгалтерии")
+            "CalculationRegister" -> listOf("РегистрыРасчета", "РегистрРасчета")
+            "ChartOfAccounts" -> listOf("ПланыСчетов", "ПланСчетов")
+            "ChartOfCharacteristicTypes" -> listOf("ПланыВидовХарактеристик", "ПланВидовХарактеристик")
+            "ChartOfCalculationTypes" -> listOf("ПланыВидовРасчета", "ПланВидовРасчета")
+            "ExchangePlan" -> listOf("ПланыОбмена", "ПланОбмена")
+            "Enum" -> listOf("Перечисления", "Перечисление")
+            "Report" -> listOf("Отчеты", "Отчет")
+            "DataProcessor" -> listOf("Обработки", "Обработка")
+            "BusinessProcess" -> listOf("БизнесПроцессы", "БизнесПроцесс")
+            "Task" -> listOf("Задачи", "Задача")
+            "DocumentJournal" -> listOf("ЖурналыДокументов", "ЖурналДокументов")
+            "Constant" -> listOf("Константы", "Константа")
+            else -> emptyList()
+        }
+
     private data class RankedItem(
         val rank: Int,
         val item: DumpSearchItem,
@@ -461,6 +515,8 @@ class DumpService(
         private const val MAX_ROUTINES = 100
         private const val MAX_CODE_LINES = 2000
         private const val MAX_GREP_LIMIT = 200
+        private const val DEFAULT_ENTRYPOINTS = 200
+        private const val MAX_ENTRYPOINTS = 1000
         private val DEFAULT_EXTENSIONS = listOf(".bsl")
         private val STATIC_KINDS = setOf("Form", "Command", "Template", "EnumValue")
     }

@@ -9,13 +9,16 @@ package ru.alkoleft.context.presentation.formatters
 
 import ru.alkoleft.context.business.entities.DumpField
 import ru.alkoleft.context.business.entities.DumpRoutine
+import ru.alkoleft.context.business.services.CheckResult
 import ru.alkoleft.context.business.services.DumpCodeResult
 import ru.alkoleft.context.business.services.DumpMetadataCard
 import ru.alkoleft.context.business.services.DumpSearchItem
 import ru.alkoleft.context.business.services.DumpSearchPage
+import ru.alkoleft.context.business.services.EntryPointPage
 import ru.alkoleft.context.business.services.GrepResult
 import ru.alkoleft.context.infrastructure.dump.DumpSnapshot
 import ru.alkoleft.context.infrastructure.dump.DumpStorage
+import ru.alkoleft.context.infrastructure.dump.UsageSummary
 import java.time.Instant
 
 /**
@@ -80,13 +83,88 @@ class DumpJsonService(
                 "commands" to card.commands.takeIf { it.isNotEmpty() },
                 "templates" to card.templates.takeIf { it.isNotEmpty() },
                 "modules" to card.modules.map(::moduleCard).takeIf { it.isNotEmpty() },
+                "usages" to card.usages?.let(::usageNode),
                 "truncated" to card.truncated,
                 "hint" to
                     if (card.modules.isNotEmpty()) {
-                        "Код модуля — dumpCode(path=…, id=…); процедуры — в routines."
+                        "Код модуля — dumpCode(path=…, id=…); процедуры — в routines; точки входа — dumpEntrypoints."
                     } else {
                         "У объекта нет модулей."
                     },
+            )
+        return pager.fit(frame.withoutNulls())
+    }
+
+    /** Страница точек входа. */
+    fun entrypoints(page: EntryPointPage): String {
+        val header =
+            linkedMapOf<String, Any?>(
+                "kind" to page.kind,
+                "metadata" to page.metadata,
+                "total" to page.total,
+                "counts" to page.counts,
+            )
+        return pager.page(
+            header = header,
+            items = page.items,
+            offset = 0,
+            total = page.total,
+            render = { entryPoint ->
+                linkedMapOf<String, Any?>(
+                    "kind" to entryPoint.kind,
+                    "name" to entryPoint.name,
+                    "owner" to entryPoint.owner,
+                    "handler" to entryPoint.handler,
+                    "event" to entryPoint.event,
+                    "path" to entryPoint.path,
+                    "sources" to entryPoint.sources.takeIf { it.isNotEmpty() },
+                ).withoutNulls()
+            },
+            hint = "Фильтры: kind (form, subscription, job, http, web), metadata=Catalog.Имя.",
+        )
+    }
+
+    /** Результат проверки модуля. */
+    fun check(result: CheckResult): String {
+        val errors = result.problems.count { it.severity == "error" }
+        val warnings = result.problems.count { it.severity == "warning" }
+        val frame =
+            linkedMapOf<String, Any?>(
+                "path" to result.path,
+                "source" to result.source,
+                "lines" to result.lines,
+                "routines" to
+                    result.routines.map { routine ->
+                        linkedMapOf<String, Any?>(
+                            "name" to routine.name,
+                            "kind" to routine.kind,
+                            "export" to routine.export,
+                            "parameters" to routine.parameters,
+                            "lines" to "${routine.startLine}-${routine.endLine}",
+                        )
+                    },
+                "calls" to result.calls,
+                "metadataAccesses" to
+                    result.metadataAccesses.map {
+                        linkedMapOf<String, Any?>(
+                            "collection" to it.collection,
+                            "name" to it.name,
+                            "context" to it.context,
+                            "line" to it.line,
+                        )
+                    },
+                "counts" to linkedMapOf<String, Any?>("errors" to errors, "warnings" to warnings),
+                "problems" to
+                    result.problems.map {
+                        linkedMapOf<String, Any?>(
+                            "line" to it.line,
+                            "severity" to it.severity,
+                            "code" to it.code,
+                            "message" to it.message,
+                            "hint" to it.hint,
+                        ).withoutNulls()
+                    },
+                "notes" to result.notes.takeIf { it.isNotEmpty() },
             )
         return pager.fit(frame.withoutNulls())
     }
@@ -201,6 +279,21 @@ class DumpJsonService(
             "detail" to item.detail,
             "id" to item.id.takeIf { it > 0 },
         ).withoutNulls()
+
+    private fun usageNode(usage: UsageSummary): Map<String, Any?> =
+        linkedMapOf<String, Any?>(
+            "total" to usage.total,
+            "byContext" to usage.byContext,
+            "readers" to
+                usage.readers.map { reader ->
+                    linkedMapOf<String, Any?>(
+                        "module" to reader.modulePath,
+                        "routine" to reader.routine,
+                        "context" to reader.context,
+                        "line" to reader.line,
+                    ).withoutNulls()
+                },
+        )
 
     private fun fieldNode(field: DumpField): Map<String, Any?> =
         linkedMapOf<String, Any?>(

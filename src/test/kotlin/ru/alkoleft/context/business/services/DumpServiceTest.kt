@@ -119,6 +119,31 @@ class DumpServiceTest {
     }
 
     @Test
+    fun `карточка объекта содержит обращения из кода и запросов`() {
+        val card = service.metadata("Catalog.Товары")
+        val usages = assertNotNull(card.usages)
+        assertTrue(usages.total > 0, "обращений нет: $usages")
+        assertTrue(usages.byContext.containsKey("query"))
+    }
+
+    @Test
+    fun `точки входа собираются из форм подписок и заданий`() {
+        val page = service.entrypoints()
+        assertEquals(4, page.total)
+        assertEquals(2, page.counts["form"])
+        assertEquals(1, page.counts["subscription"])
+        assertEquals(1, page.counts["job"])
+
+        val forms = service.entrypoints(kind = "form")
+        assertEquals(2, forms.total)
+        assertTrue(forms.items.all { it.kind == "form" && it.owner == "Catalog.Товары" })
+
+        val byMetadata = service.entrypoints(metadata = "Catalog.Товары")
+        assertEquals(3, byMetadata.total)
+        assertTrue(byMetadata.items.any { it.kind == "subscription" && it.sources.contains("Catalog.Товары") })
+    }
+
+    @Test
     fun `неизвестный объект — доменная ошибка`() {
         assertFailsWith<DefinitionNotFoundException> { service.metadata("Catalog.НетТакого") }
     }

@@ -10,9 +10,11 @@ package ru.alkoleft.context.infrastructure.configuration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.env.Environment
+import ru.alkoleft.context.business.services.DumpCheckService
 import ru.alkoleft.context.infrastructure.dump.DumpOptions
 import ru.alkoleft.context.infrastructure.dump.DumpStorage
 import ru.alkoleft.context.infrastructure.platform.PlatformOptions
+import ru.alkoleft.context.infrastructure.search.CatalogProvider
 import ru.alkoleft.context.presentation.formatters.DumpJsonService
 import ru.alkoleft.context.presentation.formatters.JsonPager
 
@@ -32,6 +34,15 @@ class DumpConfiguration {
 
     @Bean
     fun dumpStorage(options: DumpOptions): DumpStorage = DumpStorage(options)
+
+    @Bean
+    fun dumpCheckService(
+        storage: DumpStorage,
+        catalogProvider: CatalogProvider,
+    ): DumpCheckService =
+        DumpCheckService(storage) {
+            runCatching { catalogProvider.catalog() }.getOrNull()
+        }
 
     @Bean
     fun dumpJsonService(options: PlatformOptions): DumpJsonService = DumpJsonService(JsonPager(options.responseLimit))

@@ -26,6 +26,8 @@ object McpToolCatalog {
             "dumpMetadata",
             "dumpCode",
             "dumpGrep",
+            "dumpEntrypoints",
+            "dumpCheck",
             "dumpReload",
             "status",
         )

@@ -90,6 +90,22 @@ class DumpIndex(
                 }
         }
 
+    fun objectByKindAndName(
+        kind: String,
+        name: String,
+    ): DumpObject? =
+        synchronized(lock) {
+            connection
+                .prepareStatement(
+                    "SELECT id, kind, name, synonym, comment, path FROM objects " +
+                        "WHERE kind = ? AND name_lower = ? LIMIT 1",
+                ).use { statement ->
+                    statement.setString(1, kind)
+                    statement.setString(2, name.lowercase(Locale.ROOT))
+                    statement.executeQuery().use { rows -> if (rows.next()) rows.toObject() else null }
+                }
+        }
+
     fun findObjects(
         query: String,
         limit: Int,
@@ -330,6 +346,129 @@ class DumpIndex(
                 }
         }
 
+    /** Сводка обращений к объекту метаданных из кода и запросов. */
+    fun usageSummary(
+        objectName: String,
+        collections: List<String> = emptyList(),
+    ): UsageSummary =
+        synchronized(lock) {
+            val needle = objectName.lowercase(Locale.ROOT)
+            val filter =
+                if (collections.isEmpty()) {
+                    ""
+                } else {
+                    " AND r.collection IN (${collections.joinToString(",") { "?" }})"
+                }
+
+            val counts = mutableMapOf<String, Int>()
+            connection
+                .prepareStatement(
+                    "SELECT r.context, COUNT(*) AS total FROM metadata_refs r " +
+                        "WHERE r.object_name_lower = ?$filter GROUP BY r.context",
+                ).use { statement ->
+                    var index = 1
+                    statement.setString(index++, needle)
+                    collections.forEach { statement.setString(index++, it) }
+                    statement.executeQuery().use { rows ->
+                        while (rows.next()) counts[rows.getString("context")] = rows.getInt("total")
+                    }
+                }
+
+            val readers = mutableListOf<UsageReader>()
+            connection
+                .prepareStatement(
+                    "SELECT r.context, r.line, m.path, rt.name AS routine_name FROM metadata_refs r " +
+                        "JOIN modules m ON m.id = r.module_id LEFT JOIN routines rt ON rt.id = r.routine_id " +
+                        "WHERE r.object_name_lower = ?$filter ORDER BY m.path, r.line LIMIT 20",
+                ).use { statement ->
+                    var index = 1
+                    statement.setString(index++, needle)
+                    collections.forEach { statement.setString(index++, it) }
+                    statement.executeQuery().use { rows ->
+                        while (rows.next()) {
+                            readers +=
+                                UsageReader(
+                                    modulePath = rows.getString("path"),
+                                    routine = rows.getString("routine_name"),
+                                    context = rows.getString("context"),
+                                    line = rows.getInt("line"),
+                                )
+                        }
+                    }
+                }
+
+            UsageSummary(
+                objectName = objectName,
+                total = counts.values.sum(),
+                byContext = counts,
+                readers = readers,
+            )
+        }
+
+    fun entrypoints(
+        kind: String? = null,
+        metadata: String? = null,
+        limit: Int = 100,
+    ): List<EntryPointRow> {
+        val conditions = mutableListOf<String>()
+        val parameters = mutableListOf<String>()
+        kind?.takeIf { it.isNotBlank() }?.let {
+            conditions += "e.kind = ?"
+            parameters += it
+        }
+        metadata?.takeIf { it.isNotBlank() }?.let {
+            conditions +=
+                "(e.owner = ? OR EXISTS(SELECT 1 FROM entrypoint_sources s WHERE s.entrypoint_id = e.id AND s.source = ?))"
+            parameters += it
+            parameters += it
+        }
+        val where = if (conditions.isEmpty()) "" else "WHERE ${conditions.joinToString(" AND ")}"
+        return synchronized(lock) {
+            connection
+                .prepareStatement(
+                    "SELECT e.kind, e.name, e.owner, e.handler, e.event, e.path, " +
+                        "(SELECT group_concat(s.source, char(31)) FROM entrypoint_sources s " +
+                        "WHERE s.entrypoint_id = e.id) AS sources FROM entrypoints e $where " +
+                        "ORDER BY e.kind, e.name LIMIT ?",
+                ).use { statement ->
+                    var index = 1
+                    parameters.forEach { statement.setString(index++, it) }
+                    statement.setInt(index, limit.coerceIn(1, 1000))
+                    statement.executeQuery().use { rows ->
+                        buildList {
+                            while (rows.next()) {
+                                add(
+                                    EntryPointRow(
+                                        kind = rows.getString("kind"),
+                                        name = rows.getString("name"),
+                                        owner = rows.getString("owner"),
+                                        handler = rows.getString("handler"),
+                                        event = rows.getString("event"),
+                                        path = rows.getString("path"),
+                                        sources =
+                                            rows
+                                                .getString("sources")
+                                                .orEmpty()
+                                                .split('\u001f')
+                                                .filter { it.isNotBlank() },
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+        }
+    }
+
+    fun entrypointCounts(): Map<String, Int> =
+        synchronized(lock) {
+            connection.createStatement().use { statement ->
+                statement.executeQuery("SELECT kind, COUNT(*) AS total FROM entrypoints GROUP BY kind").use { rows ->
+                    buildMap { while (rows.next()) put(rows.getString("kind"), rows.getInt("total")) }
+                }
+            }
+        }
+
     override fun close() {
         runCatching { connection.close() }
     }
@@ -384,9 +523,9 @@ class DumpIndex(
     companion object {
         /**
          * Версия схемы индекса выгрузки: поднимать при изменении таблиц или правил разбора.
-         * v2 — формы и макеты-ссылки индексируются, переводы строк нормализованы.
+         * v5 — пунктуация в строках не путается с вызовами, ссылки на методы коллекций не считаются объектами.
          */
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 5
 
         fun likePattern(query: String): String {
             val escaped =
@@ -413,4 +552,31 @@ data class FieldHit(
     val field: DumpField,
     val ownerKind: String,
     val ownerName: String,
+)
+
+/** Одно обращение к объекту метаданных. */
+data class UsageReader(
+    val modulePath: String,
+    val routine: String?,
+    val context: String,
+    val line: Int,
+)
+
+/** Сводка обращений к объекту: сколько и откуда. */
+data class UsageSummary(
+    val objectName: String,
+    val total: Int,
+    val byContext: Map<String, Int>,
+    val readers: List<UsageReader>,
+)
+
+/** Точка входа в индекс. */
+data class EntryPointRow(
+    val kind: String,
+    val name: String,
+    val owner: String?,
+    val handler: String?,
+    val event: String?,
+    val path: String?,
+    val sources: List<String> = emptyList(),
 )

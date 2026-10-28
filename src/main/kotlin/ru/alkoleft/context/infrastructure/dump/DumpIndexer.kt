@@ -77,15 +77,19 @@ class DumpIndexer(
                         return@runParallel null
                     }
             val ownerId = ownerId(relative, objectDirs)
+            val parsed = BslParser.parse(text)
             ScannedModule(
                 path = relative,
                 bytes = bytes,
-                lines = DumpTextReader.countLines(text),
+                lines = parsed.lines,
                 kind = moduleKind(relative, ownerId, objectDirs),
                 objectId = ownerId,
-                routines = BslModuleScanner.scan(text),
+                routines = parsed.routines,
+                metadataRefs = parsed.metadataRefs + parsed.routines.flatMap { it.metadataRefs },
             )
         }.filterNotNull().forEach { modules += it }
+
+        val entryPoints = collectEntryPoints(root, onProgress)
 
         val info =
             writeIndex(
@@ -94,6 +98,7 @@ class DumpIndexer(
                 configuration = configuration,
                 objects = objects,
                 modules = modules,
+                entryPoints = entryPoints,
                 started = started,
             )
 
@@ -117,6 +122,7 @@ class DumpIndexer(
         configuration: ConfigurationInfo,
         objects: List<ParsedMetadata>,
         modules: List<ScannedModule>,
+        entryPoints: List<ParsedEntryPoint>,
         started: Long,
     ): DumpInfo {
         DriverManager.getConnection("jdbc:sqlite:${indexFile.toAbsolutePath()}").use { connection ->
@@ -185,35 +191,104 @@ class DumpIndexer(
                             "INSERT INTO routines(id, module_id, name, name_lower, kind, is_export, parameters, start_line, end_line) " +
                                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         ).use { routineStatement ->
-                            connection.autoCommit = false
-                            for (module in modules) {
-                                moduleId++
-                                moduleStatement.setLong(1, moduleId)
-                                module.objectId?.let { moduleStatement.setLong(2, it) }
-                                    ?: moduleStatement.setNull(2, java.sql.Types.INTEGER)
-                                moduleStatement.setString(3, module.path)
-                                moduleStatement.setString(4, module.kind)
-                                moduleStatement.setInt(5, module.lines)
-                                moduleStatement.setLong(6, module.bytes)
-                                moduleStatement.addBatch()
+                            connection
+                                .prepareStatement(
+                                    "INSERT INTO metadata_refs(" +
+                                        "module_id, routine_id, object_name, object_name_lower, " +
+                                        "collection, context, line) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                ).use { refStatement ->
+                                    connection.autoCommit = false
+                                    for (module in modules) {
+                                        moduleId++
+                                        moduleStatement.setLong(1, moduleId)
+                                        module.objectId?.let { moduleStatement.setLong(2, it) }
+                                            ?: moduleStatement.setNull(2, java.sql.Types.INTEGER)
+                                        moduleStatement.setString(3, module.path)
+                                        moduleStatement.setString(4, module.kind)
+                                        moduleStatement.setInt(5, module.lines)
+                                        moduleStatement.setLong(6, module.bytes)
+                                        moduleStatement.addBatch()
 
-                                for (routine in module.routines) {
-                                    routineId++
-                                    routineCount++
-                                    routineStatement.setLong(1, routineId)
-                                    routineStatement.setLong(2, moduleId)
-                                    routineStatement.setString(3, routine.name)
-                                    routineStatement.setString(4, routine.name.lowercase(Locale.ROOT))
-                                    routineStatement.setString(5, routine.kind)
-                                    routineStatement.setInt(6, if (routine.export) 1 else 0)
-                                    routineStatement.setString(7, routine.parameters)
-                                    routineStatement.setInt(8, routine.startLine)
-                                    routineStatement.setInt(9, routine.endLine)
-                                    routineStatement.addBatch()
+                                        val routineIds = mutableListOf<Long>()
+                                        for (routine in module.routines) {
+                                            routineId++
+                                            routineCount++
+                                            routineIds += routineId
+                                            routineStatement.setLong(1, routineId)
+                                            routineStatement.setLong(2, moduleId)
+                                            routineStatement.setString(3, routine.name)
+                                            routineStatement.setString(4, routine.name.lowercase(Locale.ROOT))
+                                            routineStatement.setString(5, routine.kind)
+                                            routineStatement.setInt(6, if (routine.export) 1 else 0)
+                                            routineStatement.setString(
+                                                7,
+                                                routine.parameters.joinToString(", ") {
+                                                    if (it.hasDefault) "${it.name}=" else it.name
+                                                },
+                                            )
+                                            routineStatement.setInt(8, routine.startLine)
+                                            routineStatement.setInt(9, routine.endLine)
+                                            routineStatement.addBatch()
+                                        }
+
+                                        for (ref in module.metadataRefs) {
+                                            val routineIndex =
+                                                module.routines.indexOfFirst { ref.line in it.startLine..it.endLine }
+                                            refStatement.setLong(1, moduleId)
+                                            if (routineIndex >= 0) {
+                                                refStatement.setLong(2, routineIds[routineIndex])
+                                            } else {
+                                                refStatement.setNull(2, java.sql.Types.INTEGER)
+                                            }
+                                            refStatement.setString(3, ref.objectName)
+                                            refStatement.setString(4, ref.objectName.lowercase(Locale.ROOT))
+                                            refStatement.setString(5, ref.collection)
+                                            refStatement.setString(6, ref.context)
+                                            refStatement.setInt(7, ref.line)
+                                            refStatement.addBatch()
+                                        }
+                                    }
+                                    moduleStatement.executeBatch()
+                                    routineStatement.executeBatch()
+                                    refStatement.executeBatch()
+                                    connection.commit()
+                                    connection.autoCommit = true
+                                }
+                        }
+                }
+
+            connection
+                .prepareStatement(
+                    "INSERT INTO entrypoints(kind, name, owner, handler, event, path) VALUES (?, ?, ?, ?, ?, ?)",
+                ).use { entryStatement ->
+                    connection
+                        .prepareStatement(
+                            "INSERT INTO entrypoint_sources(entrypoint_id, source) VALUES (?, ?)",
+                        ).use { sourceStatement ->
+                            connection.autoCommit = false
+                            for (entryPoint in entryPoints) {
+                                entryStatement.setString(1, entryPoint.kind)
+                                entryStatement.setString(2, entryPoint.name)
+                                entryStatement.setString(3, entryPoint.owner)
+                                entryStatement.setString(4, entryPoint.handler)
+                                entryStatement.setString(5, entryPoint.event)
+                                entryStatement.setString(6, entryPoint.path)
+                                entryStatement.executeUpdate()
+
+                                val entryPointId =
+                                    connection.createStatement().use { statement ->
+                                        statement.executeQuery("SELECT last_insert_rowid()").use { rows ->
+                                            rows.next()
+                                            rows.getLong(1)
+                                        }
+                                    }
+                                for (source in entryPoint.sources) {
+                                    sourceStatement.setLong(1, entryPointId)
+                                    sourceStatement.setString(2, source)
+                                    sourceStatement.addBatch()
                                 }
                             }
-                            moduleStatement.executeBatch()
-                            routineStatement.executeBatch()
+                            sourceStatement.executeBatch()
                             connection.commit()
                             connection.autoCommit = true
                         }
@@ -305,7 +380,10 @@ class DumpIndexer(
                 .filter { file ->
                     val relative = relative(root, file)
                     val name = file.fileName.toString()
-                    relative.count { it == '/' } == 1 && name !in IGNORED_FILES
+                    val section = relative.substringBefore('/')
+                    relative.count { it == '/' } == 1 &&
+                        name !in IGNORED_FILES &&
+                        section !in ENTRYPOINT_SECTIONS
                 }.toList()
         }
 
@@ -316,6 +394,55 @@ class DumpIndexer(
                 .filter { it.fileName.toString().endsWith(".bsl", ignoreCase = true) }
                 .toList()
         }
+
+    private fun collectEntryPoints(
+        root: Path,
+        onProgress: (DumpBuildProgress) -> Unit,
+    ): List<ParsedEntryPoint> {
+        val parser = EntryPointParser()
+        val formFiles =
+            Files.walk(root).use { stream ->
+                stream
+                    .filter { Files.isRegularFile(it) }
+                    .filter { it.fileName.toString() == "Form.xml" }
+                    .filter { file ->
+                        val relative = relative(root, file)
+                        relative.startsWith("CommonForms/") || relative.contains("/Forms/")
+                    }.toList()
+            }
+        val forms =
+            runParallel(formFiles, "формы", onProgress) { file ->
+                parser.parseForm(file, relative(root, file))
+            }.flatten()
+
+        val result = forms.toMutableList()
+        val subscriptionDir = root.resolve("EventSubscriptions")
+        if (Files.isDirectory(subscriptionDir)) {
+            Files.list(subscriptionDir).use { stream ->
+                stream
+                    .filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(".xml") }
+                    .forEach { file -> parser.parseSubscription(file, relative(root, file))?.let { result += it } }
+            }
+        }
+        val jobsDir = root.resolve("ScheduledJobs")
+        if (Files.isDirectory(jobsDir)) {
+            Files.list(jobsDir).use { stream ->
+                stream
+                    .filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(".xml") }
+                    .forEach { file -> parser.parseJob(file, relative(root, file))?.let { result += it } }
+            }
+        }
+        for ((directory, kind) in listOf("HTTPServices" to "http", "WebServices" to "web")) {
+            val dir = root.resolve(directory)
+            if (!Files.isDirectory(dir)) continue
+            Files.list(dir).use { stream ->
+                stream
+                    .filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(".xml") }
+                    .forEach { file -> result += parser.parseService(file, relative(root, file), kind) }
+            }
+        }
+        return result
+    }
 
     private fun ownerId(
         relative: String,
@@ -394,7 +521,8 @@ class DumpIndexer(
         val lines: Int,
         val kind: String,
         val objectId: Long?,
-        val routines: List<ScannedRoutine>,
+        val routines: List<ParsedRoutine>,
+        val metadataRefs: List<ParsedMetadataRef>,
     )
 
     companion object {
@@ -420,6 +548,9 @@ class DumpIndexer(
                 "DCS.xml",
             )
 
+        private val ENTRYPOINT_SECTIONS =
+            setOf("EventSubscriptions", "ScheduledJobs", "HTTPServices", "WebServices")
+
         private val SCHEMA =
             listOf(
                 "CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -435,6 +566,13 @@ class DumpIndexer(
                 "CREATE TABLE routines(" +
                     "id INTEGER PRIMARY KEY, module_id INTEGER NOT NULL, name TEXT NOT NULL, name_lower TEXT NOT NULL, " +
                     "kind TEXT NOT NULL, is_export INTEGER, parameters TEXT, start_line INTEGER, end_line INTEGER)",
+                "CREATE TABLE metadata_refs(" +
+                    "id INTEGER PRIMARY KEY, module_id INTEGER NOT NULL, routine_id INTEGER, object_name TEXT NOT NULL, " +
+                    "object_name_lower TEXT NOT NULL, collection TEXT NOT NULL, context TEXT NOT NULL, line INTEGER NOT NULL)",
+                "CREATE TABLE entrypoints(" +
+                    "id INTEGER PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, owner TEXT, handler TEXT, event TEXT, path TEXT)",
+                "CREATE TABLE entrypoint_sources(" +
+                    "id INTEGER PRIMARY KEY, entrypoint_id INTEGER NOT NULL, source TEXT NOT NULL)",
             )
 
         private val INDICES =
@@ -447,6 +585,11 @@ class DumpIndexer(
                 "CREATE INDEX idx_modules_path ON modules(path)",
                 "CREATE INDEX idx_routines_module ON routines(module_id)",
                 "CREATE INDEX idx_routines_name ON routines(name_lower)",
+                "CREATE INDEX idx_refs_object ON metadata_refs(object_name_lower)",
+                "CREATE INDEX idx_refs_module ON metadata_refs(module_id)",
+                "CREATE INDEX idx_entrypoints_kind ON entrypoints(kind)",
+                "CREATE INDEX idx_entrypoints_owner ON entrypoints(owner)",
+                "CREATE INDEX idx_entrypoint_sources_source ON entrypoint_sources(source)",
             )
     }
 }

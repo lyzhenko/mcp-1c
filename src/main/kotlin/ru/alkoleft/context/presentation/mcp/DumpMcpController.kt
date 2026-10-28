@@ -11,6 +11,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import org.springframework.ai.tool.annotation.Tool
 import org.springframework.ai.tool.annotation.ToolParam
 import org.springframework.stereotype.Service
+import ru.alkoleft.context.business.services.DumpCheckService
 import ru.alkoleft.context.business.services.DumpService
 import ru.alkoleft.context.exceptions.DefinitionNotFoundException
 import ru.alkoleft.context.exceptions.DomainException
@@ -31,6 +32,7 @@ private val logger = KotlinLogging.logger {}
 @Service
 class DumpMcpController(
     private val dumpService: DumpService,
+    private val checkService: DumpCheckService,
     private val formatter: DumpJsonService,
 ) {
     @Tool(
@@ -154,6 +156,48 @@ class DumpMcpController(
                     deadlineMs = deadlineMs ?: 8_000,
                 ),
             )
+        }
+
+    @Tool(
+        name = "dumpEntrypoints",
+        description =
+            "Точки входа конфигурации: обработчики форм, подписки на события, регламентные задания, " +
+                "HTTP- и веб-сервисы. Возвращает обработчик и объект-владелец.",
+        resultConverter = RawJsonResultConverter::class,
+    )
+    fun dumpEntrypoints(
+        @ToolParam(
+            description = "Вид: form, subscription, job, http, web. Не задан — все виды.",
+            required = false,
+        )
+        kind: String? = null,
+        @ToolParam(description = "Оставить точки входа объекта: Catalog.Номенклатура.", required = false)
+        metadata: String? = null,
+        @ToolParam(description = "Сколько записей вернуть: 1–1000, по умолчанию 200.", required = false)
+        limit: Int? = null,
+    ): String =
+        respond("dumpEntrypoints") {
+            formatter.entrypoints(dumpService.entrypoints(kind, metadata, limit))
+        }
+
+    @Tool(
+        name = "dumpCheck",
+        description =
+            "Проверка модуля BSL или черновика без запуска 1С: неизвестные процедуры, число аргументов " +
+                "у своих процедур, общих модулей и методов платформы, отсутствующие метаданные, " +
+                "неиспользуемые переменные и параметры, функция без «Возврат».",
+        resultConverter = RawJsonResultConverter::class,
+    )
+    fun dumpCheck(
+        @ToolParam(description = "Путь модуля в выгрузке; можно не указывать, если передан text.", required = false)
+        path: String? = null,
+        @ToolParam(description = "Идентификатор модуля из dumpMetadata.", required = false)
+        id: Long? = null,
+        @ToolParam(description = "Текст черновика: проверяется без файла в выгрузке.", required = false)
+        text: String? = null,
+    ): String =
+        respond("dumpCheck") {
+            formatter.check(checkService.check(path, id, text))
         }
 
     @Tool(

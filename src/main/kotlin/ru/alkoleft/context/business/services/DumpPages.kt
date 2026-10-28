@@ -11,6 +11,7 @@ import ru.alkoleft.context.business.entities.DumpField
 import ru.alkoleft.context.business.entities.DumpModule
 import ru.alkoleft.context.business.entities.DumpObject
 import ru.alkoleft.context.business.entities.DumpRoutine
+import ru.alkoleft.context.infrastructure.dump.UsageSummary
 
 /** Совпадение поиска по выгрузке. */
 data class DumpSearchItem(
@@ -60,6 +61,27 @@ data class DumpMetadataCard(
     val modules: List<DumpModuleCard>,
     val totalFields: Int,
     val truncated: Boolean,
+    val usages: UsageSummary? = null,
+)
+
+/** Точка входа в ответе агента. */
+data class DumpEntryPoint(
+    val kind: String,
+    val name: String,
+    val owner: String?,
+    val handler: String?,
+    val event: String?,
+    val path: String?,
+    val sources: List<String>,
+)
+
+/** Страница точек входа. */
+data class EntryPointPage(
+    val kind: String?,
+    val metadata: String?,
+    val total: Int,
+    val items: List<DumpEntryPoint>,
+    val counts: Map<String, Int>,
 )
 
 /** Результат чтения модуля. */

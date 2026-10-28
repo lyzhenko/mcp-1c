@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+	<EventSubscription uuid="00000000-0000-0000-0000-000000000501">
+		<Properties>
+			<Name>ПередЗаписьюТовара</Name>
+			<Event>BeforeWrite</Event>
+			<Handler>CommonModule.ОбщегоНазначения.ЗаполнитьТовары</Handler>
+			<Source>
+				<v8:Type>cfg:CatalogObject.Товары</v8:Type>
+			</Source>
+		</Properties>
+	</EventSubscription>
+</MetaDataObject>

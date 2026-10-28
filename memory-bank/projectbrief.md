@@ -10,11 +10,14 @@ MCP-сервер (Model Context Protocol) для 1С:Предприятие. Д�
 
 ## Возможности
 
-- 12 инструментов: `search`, `info`, `getMember`, `getMembers`, `getConstructors`, `status`,
-  `dumpOpen`, `dumpSearch`, `dumpMetadata`, `dumpCode`, `dumpGrep`, `dumpReload`.
+- 14 инструментов: `search`, `info`, `getMember`, `getMembers`, `getConstructors`, `status`,
+  `dumpOpen`, `dumpSearch`, `dumpMetadata`, `dumpCode`, `dumpGrep`, `dumpEntrypoints`,
+  `dumpCheck`, `dumpReload`.
 - Структурная модель справки: сигнатуры, параметры, возвращаемые типы, примеры, конструкторы,
   значения перечислений.
 - SQLite-индекс выгрузки: объекты, реквизиты, табличные части, формы, модули, процедуры.
+- Ссылки на метаданные из кода и запросов (`usages`), точки входа (формы, подписки, задания,
+  сервисы), проверка модуля/черновика.
 - Поиск с ранжированием и подсказками; grep по модулям с владельцем и процедурой.
 - Поиск установленных платформ: версии, язык `ru`/`en`, стандартные каталоги ОС.
 - Дисковый кэш разбора, фоновая загрузка, `platform_not_ready`/`dump_not_ready`.
@@ -34,10 +37,12 @@ MCP-сервер (Model Context Protocol) для 1С:Предприятие. Д�
 - `PlatformContextLoader` — кэш или разбор `.hbk`, маппинг в домен.
 - `PlatformContextStorage` — состояния `idle/loading/ready/failed`, ожидание готовности.
 - `PlatformCatalog` — ранжирование, подсказки, точные карточки.
-- `JsonResponseService` — JSON и ограничение размера ответа.
+- `JsonResponseService`, `DumpJsonService` — JSON и ограничение размера ответа.
+- `DumpIndexer`, `DumpIndex`, `DumpStorage` — SQLite-индекс, ссылки, точки входа.
+- `BslParser`, `DumpCheckService` — разбор модуля и проверки черновика.
 - `PlatformBenchmark` — замеры разбора, кэша и поиска.
 
 ## Проверка
 
-`./gradlew test -PPLATFORM_PATH=<путь>` — 91 тест, включая интеграционные на реальной справке;
-`./gradlew ktlintCheck`; `--benchmark` для замеров.
+`./gradlew test -PPLATFORM_PATH=<путь>` — 114 тестов, включая интеграционные на реальной справке
+и тесты выгрузки на синтетическом дампе; `./gradlew ktlintCheck`; `--benchmark` для замеров.
