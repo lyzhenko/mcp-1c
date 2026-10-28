@@ -43,62 +43,68 @@ class DumpIndexer(
     fun build(
         dump: Path,
         indexFile: Path,
+        overlays: List<Path> = emptyList(),
         onProgress: (DumpBuildProgress) -> Unit = {},
     ): DumpInfo {
         val started = System.currentTimeMillis()
         val root = dump.toAbsolutePath().normalize()
         require(Files.isDirectory(root)) { "Каталог выгрузки не найден: $root" }
+        val roots = listOf(root) + overlays.map { it.toAbsolutePath().normalize() }
+        roots.drop(1).forEach { require(Files.isDirectory(it)) { "Каталог расширения не найден: $it" } }
+        val sources = effectiveSources(roots)
+        val rootLabel = roots.joinToString(";")
 
         Files.createDirectories(indexFile.toAbsolutePath().parent)
         val building = indexFile.resolveSibling("${indexFile.fileName}.building")
         Files.deleteIfExists(building)
 
-        val configuration = readConfiguration(root)
-        val xmlFiles = collectMetadataFiles(root)
+        val configuration =
+            readConfiguration(sources["Configuration.xml"] ?: throw IllegalStateException("нет Configuration.xml"))
+        val xmlFiles = collectMetadataFiles(sources)
         val objectDirs = mutableMapOf<String, Long>()
         val objects = mutableListOf<ParsedMetadata>()
 
-        runParallel(xmlFiles, "метаданные", onProgress) { file ->
-            val relative = relative(root, file)
-            val element = MetadataXmlParser().parse(file, relative) ?: return@runParallel null
-            element
+        runParallel(xmlFiles, "метаданные", onProgress) { source ->
+            MetadataXmlParser().parse(source.file, source.relative) ?: return@runParallel null
         }.filterNotNull().forEach { objects += it }
         objects.forEachIndexed { index, element -> element.obj.let { objectDirs[it.path.removeSuffix(".xml")] = index + 1L } }
 
-        val bslFiles = collectModuleFiles(root)
+        val bslFiles = collectModuleFiles(sources)
         val modules = mutableListOf<ScannedModule>()
-        runParallel(bslFiles, "модули", onProgress) { file ->
-            val relative = relative(root, file)
-            val bytes = runCatching { Files.size(file) }.getOrDefault(0)
+        runParallel(bslFiles, "модули", onProgress) { source ->
+            val bytes = runCatching { Files.size(source.file) }.getOrDefault(0)
             val text =
-                runCatching { DumpTextReader.read(file) }
+                runCatching { DumpTextReader.read(source.file) }
                     .getOrElse { error ->
-                        logger.warn { "Не прочитан модуль $relative: ${error.message}" }
+                        logger.warn { "Не прочитан модуль ${source.relative}: ${error.message}" }
                         return@runParallel null
                     }
-            val ownerId = ownerId(relative, objectDirs)
+            val ownerId = ownerId(source.relative, objectDirs)
             val parsed = BslParser.parse(text)
             ScannedModule(
-                path = relative,
+                path = source.relative,
                 bytes = bytes,
                 lines = parsed.lines,
-                kind = moduleKind(relative, ownerId, objectDirs),
+                kind = moduleKind(source.relative, ownerId, objectDirs),
                 objectId = ownerId,
                 routines = parsed.routines,
                 metadataRefs = parsed.metadataRefs + parsed.routines.flatMap { it.metadataRefs },
+                calls = parsed.calls + parsed.routines.flatMap { it.calls },
             )
         }.filterNotNull().forEach { modules += it }
 
-        val entryPoints = collectEntryPoints(root, onProgress)
+        val entryPoints = collectEntryPoints(sources, onProgress)
+        val roles = collectRoles(sources, onProgress)
 
         val info =
             writeIndex(
                 indexFile = building,
-                root = root,
+                root = rootLabel,
                 configuration = configuration,
                 objects = objects,
                 modules = modules,
                 entryPoints = entryPoints,
+                roles = roles,
                 started = started,
             )
 
@@ -118,11 +124,12 @@ class DumpIndexer(
 
     private fun writeIndex(
         indexFile: Path,
-        root: Path,
+        root: String,
         configuration: ConfigurationInfo,
         objects: List<ParsedMetadata>,
         modules: List<ScannedModule>,
         entryPoints: List<ParsedEntryPoint>,
+        roles: List<ParsedRole>,
         started: Long,
     ): DumpInfo {
         DriverManager.getConnection("jdbc:sqlite:${indexFile.toAbsolutePath()}").use { connection ->
@@ -182,6 +189,9 @@ class DumpIndexer(
             var moduleId = 0L
             var routineId = 0L
             var routineCount = 0
+            val pendingCalls = mutableListOf<PendingCall>()
+            val moduleIdByPath = mutableMapOf<String, Long>()
+            val routineIdsByModule = mutableMapOf<Long, Map<String, Long>>()
             connection
                 .prepareStatement(
                     "INSERT INTO modules(id, object_id, path, kind, lines, bytes) VALUES (?, ?, ?, ?, ?, ?)",
@@ -200,6 +210,7 @@ class DumpIndexer(
                                     connection.autoCommit = false
                                     for (module in modules) {
                                         moduleId++
+                                        moduleIdByPath[module.path] = moduleId
                                         moduleStatement.setLong(1, moduleId)
                                         module.objectId?.let { moduleStatement.setLong(2, it) }
                                             ?: moduleStatement.setNull(2, java.sql.Types.INTEGER)
@@ -210,10 +221,12 @@ class DumpIndexer(
                                         moduleStatement.addBatch()
 
                                         val routineIds = mutableListOf<Long>()
+                                        val routineIdsByName = mutableMapOf<String, Long>()
                                         for (routine in module.routines) {
                                             routineId++
                                             routineCount++
                                             routineIds += routineId
+                                            routineIdsByName[routine.name.lowercase(Locale.ROOT)] = routineId
                                             routineStatement.setLong(1, routineId)
                                             routineStatement.setLong(2, moduleId)
                                             routineStatement.setString(3, routine.name)
@@ -247,6 +260,18 @@ class DumpIndexer(
                                             refStatement.setInt(7, ref.line)
                                             refStatement.addBatch()
                                         }
+
+                                        for (call in module.calls) {
+                                            val routineIndex =
+                                                module.routines.indexOfFirst { call.line in it.startLine..it.endLine }
+                                            pendingCalls +=
+                                                PendingCall(
+                                                    moduleId = moduleId,
+                                                    routineId = routineIds.getOrNull(routineIndex),
+                                                    call = call,
+                                                )
+                                        }
+                                        routineIdsByModule[moduleId] = routineIdsByName
                                     }
                                     moduleStatement.executeBatch()
                                     routineStatement.executeBatch()
@@ -254,6 +279,66 @@ class DumpIndexer(
                                     connection.commit()
                                     connection.autoCommit = true
                                 }
+                        }
+                }
+
+            connection
+                .prepareStatement(
+                    "INSERT INTO calls(module_id, routine_id, callee, callee_lower, qualifier, kind, line, " +
+                        "target_routine_id, external) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ).use { callStatement ->
+                    connection.autoCommit = false
+                    for (pending in pendingCalls) {
+                        val (targetRoutineId, external) =
+                            resolveCall(pending, moduleIdByPath, routineIdsByModule)
+                        callStatement.setLong(1, pending.moduleId)
+                        pending.routineId?.let { callStatement.setLong(2, it) }
+                            ?: callStatement.setNull(2, java.sql.Types.INTEGER)
+                        callStatement.setString(3, pending.call.name)
+                        callStatement.setString(4, pending.call.name.lowercase(Locale.ROOT))
+                        callStatement.setString(5, pending.call.qualifier)
+                        callStatement.setString(6, pending.call.kind)
+                        callStatement.setInt(7, pending.call.line)
+                        targetRoutineId?.let { callStatement.setLong(8, it) }
+                            ?: callStatement.setNull(8, java.sql.Types.INTEGER)
+                        callStatement.setString(9, external)
+                        callStatement.addBatch()
+                    }
+                    callStatement.executeBatch()
+                    connection.commit()
+                    connection.autoCommit = true
+                }
+
+            connection
+                .prepareStatement(
+                    "INSERT INTO roles(name, name_lower, path) VALUES (?, ?, ?)",
+                ).use { roleStatement ->
+                    connection
+                        .prepareStatement(
+                            "INSERT INTO role_rights(role_id, object_ref, object_ref_lower, right_name, value, condition) " +
+                                "VALUES (?, ?, ?, ?, ?, ?)",
+                        ).use { rightStatement ->
+                            connection.autoCommit = false
+                            var roleId = 0L
+                            for (role in roles) {
+                                roleId++
+                                roleStatement.setString(1, role.name)
+                                roleStatement.setString(2, role.name.lowercase(Locale.ROOT))
+                                roleStatement.setString(3, role.path)
+                                roleStatement.executeUpdate()
+                                for (right in role.rights) {
+                                    rightStatement.setLong(1, roleId)
+                                    rightStatement.setString(2, right.objectRef)
+                                    rightStatement.setString(3, right.objectRef.lowercase(Locale.ROOT))
+                                    rightStatement.setString(4, right.right)
+                                    rightStatement.setInt(5, if (right.value) 1 else 0)
+                                    rightStatement.setString(6, right.condition)
+                                    rightStatement.addBatch()
+                                }
+                            }
+                            rightStatement.executeBatch()
+                            connection.commit()
+                            connection.autoCommit = true
                         }
                 }
 
@@ -304,7 +389,7 @@ class DumpIndexer(
                 connection,
                 mapOf(
                     "schema" to DumpIndex.SCHEMA_VERSION.toString(),
-                    "dump.path" to root.toString(),
+                    "dump.path" to root,
                     "dump.configuration" to configuration.name,
                     "dump.version" to configuration.version,
                     "dump.objects" to objects.size.toString(),
@@ -317,7 +402,7 @@ class DumpIndexer(
             )
 
             return DumpInfo(
-                path = root.toString(),
+                path = root,
                 configuration = configuration.name,
                 version = configuration.version,
                 objects = objects.size,
@@ -344,23 +429,23 @@ class DumpIndexer(
         }
     }
 
-    private fun <T> runParallel(
-        files: List<Path>,
+    private fun <I, T> runParallel(
+        items: List<I>,
         phase: String,
         onProgress: (DumpBuildProgress) -> Unit,
-        parse: (Path) -> T?,
+        parse: (I) -> T?,
     ): List<T> {
-        if (files.isEmpty()) return emptyList()
+        if (items.isEmpty()) return emptyList()
         val pool = Executors.newFixedThreadPool(parallelism)
         val done = AtomicInteger(0)
         return try {
             val tasks =
-                files.map { file ->
+                items.map { item ->
                     Callable {
-                        val result = runCatching { parse(file) }.getOrNull()
+                        val result = runCatching { parse(item) }.getOrNull()
                         val processed = done.incrementAndGet()
-                        if (processed % 128 == 0 || processed == files.size) {
-                            onProgress(DumpBuildProgress(phase, processed, files.size))
+                        if (processed % 128 == 0 || processed == items.size) {
+                            onProgress(DumpBuildProgress(phase, processed, items.size))
                         }
                         result
                     }
@@ -372,74 +457,77 @@ class DumpIndexer(
         }
     }
 
-    private fun collectMetadataFiles(root: Path): List<Path> =
-        Files.walk(root, 2).use { stream ->
-            stream
-                .filter { Files.isRegularFile(it) }
-                .filter { it.fileName.toString().endsWith(".xml", ignoreCase = true) }
-                .filter { file ->
-                    val relative = relative(root, file)
-                    val name = file.fileName.toString()
-                    val section = relative.substringBefore('/')
-                    relative.count { it == '/' } == 1 &&
-                        name !in IGNORED_FILES &&
-                        section !in ENTRYPOINT_SECTIONS
-                }.toList()
+    private fun effectiveSources(roots: List<Path>): Map<String, Path> {
+        val result = LinkedHashMap<String, Path>()
+        for (root in roots) {
+            Files.walk(root).use { stream ->
+                stream
+                    .filter { Files.isRegularFile(it) }
+                    .forEach { file -> result[relative(root, file)] = file }
+            }
         }
+        return result
+    }
 
-    private fun collectModuleFiles(root: Path): List<Path> =
-        Files.walk(root).use { stream ->
-            stream
-                .filter { Files.isRegularFile(it) }
-                .filter { it.fileName.toString().endsWith(".bsl", ignoreCase = true) }
-                .toList()
-        }
+    private fun collectMetadataFiles(sources: Map<String, Path>): List<SourceFile> =
+        sources.entries
+            .filter { (relative, _) ->
+                relative.count { it == '/' } == 1 &&
+                    relative.endsWith(".xml", ignoreCase = true) &&
+                    relative.substringAfterLast('/') !in IGNORED_FILES &&
+                    relative.substringBefore('/') !in ENTRYPOINT_SECTIONS
+            }.map { SourceFile(it.key, it.value) }
+
+    private fun collectModuleFiles(sources: Map<String, Path>): List<SourceFile> =
+        sources.entries
+            .filter { it.key.endsWith(".bsl", ignoreCase = true) }
+            .map { SourceFile(it.key, it.value) }
+
+    private fun collectRoles(
+        sources: Map<String, Path>,
+        onProgress: (DumpBuildProgress) -> Unit,
+    ): List<ParsedRole> {
+        val files =
+            sources.entries
+                .filter { it.key.startsWith("Roles/") && it.key.endsWith("/Ext/Rights.xml") }
+                .map { SourceFile(it.key, it.value) }
+        return runParallel(files, "роли", onProgress) { source ->
+            val roleName = source.relative.split('/').getOrNull(1) ?: return@runParallel null
+            RightsParser().parse(source.file, source.relative, roleName)
+        }.filterNotNull()
+    }
 
     private fun collectEntryPoints(
-        root: Path,
+        sources: Map<String, Path>,
         onProgress: (DumpBuildProgress) -> Unit,
     ): List<ParsedEntryPoint> {
         val parser = EntryPointParser()
         val formFiles =
-            Files.walk(root).use { stream ->
-                stream
-                    .filter { Files.isRegularFile(it) }
-                    .filter { it.fileName.toString() == "Form.xml" }
-                    .filter { file ->
-                        val relative = relative(root, file)
-                        relative.startsWith("CommonForms/") || relative.contains("/Forms/")
-                    }.toList()
-            }
+            sources.entries
+                .filter { (relative, _) ->
+                    relative.endsWith("/Form.xml") &&
+                        (relative.startsWith("CommonForms/") || relative.contains("/Forms/"))
+                }.map { SourceFile(it.key, it.value) }
         val forms =
-            runParallel(formFiles, "формы", onProgress) { file ->
-                parser.parseForm(file, relative(root, file))
+            runParallel(formFiles, "формы", onProgress) { source ->
+                parser.parseForm(source.file, source.relative)
             }.flatten()
 
         val result = forms.toMutableList()
-        val subscriptionDir = root.resolve("EventSubscriptions")
-        if (Files.isDirectory(subscriptionDir)) {
-            Files.list(subscriptionDir).use { stream ->
-                stream
-                    .filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(".xml") }
-                    .forEach { file -> parser.parseSubscription(file, relative(root, file))?.let { result += it } }
-            }
-        }
-        val jobsDir = root.resolve("ScheduledJobs")
-        if (Files.isDirectory(jobsDir)) {
-            Files.list(jobsDir).use { stream ->
-                stream
-                    .filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(".xml") }
-                    .forEach { file -> parser.parseJob(file, relative(root, file))?.let { result += it } }
-            }
+        for ((prefix, parserAction) in listOf<Pair<String, (SourceFile) -> ParsedEntryPoint?>>(
+            "EventSubscriptions/" to { source -> parser.parseSubscription(source.file, source.relative) },
+            "ScheduledJobs/" to { source -> parser.parseJob(source.file, source.relative) },
+        )) {
+            sources.entries
+                .filter { it.key.startsWith(prefix) && it.key.count { char -> char == '/' } == 1 }
+                .map { SourceFile(it.key, it.value) }
+                .forEach { source -> parserAction(source)?.let { result += it } }
         }
         for ((directory, kind) in listOf("HTTPServices" to "http", "WebServices" to "web")) {
-            val dir = root.resolve(directory)
-            if (!Files.isDirectory(dir)) continue
-            Files.list(dir).use { stream ->
-                stream
-                    .filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(".xml") }
-                    .forEach { file -> result += parser.parseService(file, relative(root, file), kind) }
-            }
+            sources.entries
+                .filter { it.key.startsWith("$directory/") && it.key.count { char -> char == '/' } == 1 }
+                .map { SourceFile(it.key, it.value) }
+                .forEach { source -> result += parser.parseService(source.file, source.relative, kind) }
         }
         return result
     }
@@ -484,8 +572,31 @@ class DumpIndexer(
         }
     }
 
-    private fun readConfiguration(root: Path): ConfigurationInfo {
-        val file = root.resolve("Configuration.xml")
+    private fun resolveCall(
+        pending: PendingCall,
+        moduleIdByPath: Map<String, Long>,
+        routineIdsByModule: Map<Long, Map<String, Long>>,
+    ): Pair<Long?, String?> {
+        val call = pending.call
+        val lower = call.name.lowercase(Locale.ROOT)
+        if (call.kind == "new") return null to "Новый ${call.name}"
+        if (!call.qualified) {
+            val target = routineIdsByModule[pending.moduleId]?.get(lower)
+            return target to if (target == null) call.name else null
+        }
+        val qualifier = call.qualifier
+        if (!qualifier.isNullOrBlank()) {
+            val targetModule = moduleIdByPath["CommonModules/$qualifier/Ext/Module.bsl"]
+            if (targetModule != null) {
+                val target = routineIdsByModule[targetModule]?.get(lower)
+                if (target != null) return target to null
+            }
+            return null to "$qualifier.${call.name}"
+        }
+        return null to call.name
+    }
+
+    private fun readConfiguration(file: Path): ConfigurationInfo {
         if (!Files.isRegularFile(file)) return ConfigurationInfo("", "")
         val text = runCatching { DumpTextReader.read(file) }.getOrDefault("")
         val name =
@@ -510,6 +621,11 @@ class DumpIndexer(
         file: Path,
     ): String = root.relativize(file).toString().replace('\\', '/')
 
+    private data class SourceFile(
+        val relative: String,
+        val file: Path,
+    )
+
     private data class ConfigurationInfo(
         val name: String,
         val version: String,
@@ -523,6 +639,13 @@ class DumpIndexer(
         val objectId: Long?,
         val routines: List<ParsedRoutine>,
         val metadataRefs: List<ParsedMetadataRef>,
+        val calls: List<ParsedCall>,
+    )
+
+    private data class PendingCall(
+        val moduleId: Long,
+        val routineId: Long?,
+        val call: ParsedCall,
     )
 
     companion object {
@@ -573,6 +696,15 @@ class DumpIndexer(
                     "id INTEGER PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, owner TEXT, handler TEXT, event TEXT, path TEXT)",
                 "CREATE TABLE entrypoint_sources(" +
                     "id INTEGER PRIMARY KEY, entrypoint_id INTEGER NOT NULL, source TEXT NOT NULL)",
+                "CREATE TABLE calls(" +
+                    "id INTEGER PRIMARY KEY, module_id INTEGER NOT NULL, routine_id INTEGER, callee TEXT NOT NULL, " +
+                    "callee_lower TEXT NOT NULL, qualifier TEXT, kind TEXT, line INTEGER, " +
+                    "target_routine_id INTEGER, external TEXT)",
+                "CREATE TABLE roles(" +
+                    "id INTEGER PRIMARY KEY, name TEXT NOT NULL, name_lower TEXT NOT NULL, path TEXT)",
+                "CREATE TABLE role_rights(" +
+                    "id INTEGER PRIMARY KEY, role_id INTEGER NOT NULL, object_ref TEXT NOT NULL, " +
+                    "object_ref_lower TEXT NOT NULL, right_name TEXT NOT NULL, value INTEGER, condition TEXT)",
             )
 
         private val INDICES =
@@ -590,6 +722,13 @@ class DumpIndexer(
                 "CREATE INDEX idx_entrypoints_kind ON entrypoints(kind)",
                 "CREATE INDEX idx_entrypoints_owner ON entrypoints(owner)",
                 "CREATE INDEX idx_entrypoint_sources_source ON entrypoint_sources(source)",
+                "CREATE INDEX idx_calls_module ON calls(module_id)",
+                "CREATE INDEX idx_calls_routine ON calls(routine_id)",
+                "CREATE INDEX idx_calls_target ON calls(target_routine_id)",
+                "CREATE INDEX idx_calls_name ON calls(callee_lower)",
+                "CREATE INDEX idx_roles_name ON roles(name_lower)",
+                "CREATE INDEX idx_role_rights_role ON role_rights(role_id)",
+                "CREATE INDEX idx_role_rights_object ON role_rights(object_ref_lower)",
             )
     }
 }

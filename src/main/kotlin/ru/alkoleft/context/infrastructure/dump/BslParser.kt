@@ -39,6 +39,7 @@ data class ParsedParameter(
 data class ParsedLocal(
     val name: String,
     val line: Int,
+    val typeHint: String? = null,
 )
 
 /** Неиспользуемый параметр или локальная переменная. */
@@ -125,6 +126,27 @@ object BslParser {
             "константы",
             "критерииотбора",
             "функциональныеопции",
+        )
+
+    private val REFERENCE_TYPES =
+        mapOf(
+            "справочники" to "СправочникСсылка",
+            "документы" to "ДокументСсылка",
+            "перечисления" to "ПеречислениеСсылка",
+            "планысчетов" to "ПланСчетовСсылка",
+            "планывидовхарактеристик" to "ПланВидовХарактеристикСсылка",
+            "планывидоврасчета" to "ПланВидовРасчетаСсылка",
+            "планыобмена" to "ПланОбменаСсылка",
+            "регистрысведений" to "РегистрСведенийКлючЗаписи",
+            "регистрынакопления" to "РегистрНакопленияКлючЗаписи",
+            "регистрыбухгалтерии" to "РегистрБухгалтерииКлючЗаписи",
+            "регистрырасчета" to "РегистрРасчетаКлючЗаписи",
+            "бизнеспроцессы" to "БизнесПроцессСсылка",
+            "задачи" to "ЗадачаСсылка",
+            "отчеты" to "ОтчетСсылка",
+            "обработки" to "ОбработкаСсылка",
+            "журналыдокументов" to "ЖурналДокументовСсылка",
+            "константы" to "КонстантаМенеджерЗначения",
         )
 
     private val CALL_KEYWORDS =
@@ -397,7 +419,9 @@ object BslParser {
                             )
                     } else if (next?.isPunct("=") == true && isStatementStart(tokens, index)) {
                         val name = token.text.lowercase(Locale.ROOT)
-                        if (name !in parameterNames) locals += ParsedLocal(token.text, token.line)
+                        if (name !in parameterNames) {
+                            locals += ParsedLocal(token.text, token.line, inferType(tokens, index + 2))
+                        }
                     }
 
                     if (token.text.lowercase(Locale.ROOT) in METADATA_COLLECTIONS && next?.isPunct(".") == true) {
@@ -424,6 +448,30 @@ object BslParser {
             index++
         }
         return Analysis(locals, calls, refs)
+    }
+
+    private fun inferType(
+        tokens: List<BslToken>,
+        start: Int,
+    ): String? {
+        val token = tokens.getOrNull(start) ?: return null
+        return when {
+            token.type == BslTokenType.STRING -> "Строка"
+            token.type == BslTokenType.NUMBER -> "Число"
+            token.isIdentifier("Истина") || token.isIdentifier("Ложь") -> "Булево"
+            token.isIdentifier("Неопределено") -> "Неопределено"
+            token.isIdentifier("Новый") ->
+                tokens.getOrNull(start + 1)?.takeIf { it.type == BslTokenType.IDENT }?.text
+            token.isIdentifier("Тип") && tokens.getOrNull(start + 1)?.isPunct("(") == true -> "Тип"
+            token.type == BslTokenType.IDENT &&
+                token.text.lowercase(Locale.ROOT) in METADATA_COLLECTIONS &&
+                tokens.getOrNull(start + 1)?.isPunct(".") == true -> {
+                val name = tokens.getOrNull(start + 2)?.takeIf { it.type == BslTokenType.IDENT }?.text
+                val singular = REFERENCE_TYPES[token.text.lowercase(Locale.ROOT)]
+                if (singular != null && name != null) "$singular.$name" else null
+            }
+            else -> null
+        }
     }
 
     private fun isStatementStart(

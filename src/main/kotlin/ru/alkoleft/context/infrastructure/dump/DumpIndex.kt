@@ -301,6 +301,133 @@ class DumpIndex(
                 }
         }
 
+    fun moduleById(id: Long): DumpModule? = synchronized(lock) { moduleInternal(id) }
+
+    fun routineById(id: Long): DumpRoutine? =
+        synchronized(lock) {
+            connection
+                .prepareStatement(
+                    "SELECT id, module_id, name, kind, is_export, parameters, start_line, end_line " +
+                        "FROM routines WHERE id = ?",
+                ).use { statement ->
+                    statement.setLong(1, id)
+                    statement.executeQuery().use { rows -> if (rows.next()) rows.toRoutine() else null }
+                }
+        }
+
+    /** Исходящие вызовы процедуры. */
+    fun callsFrom(routineId: Long): List<CallEdge> =
+        synchronized(lock) {
+            connection
+                .prepareStatement(
+                    "SELECT c.id, c.callee, c.qualifier, c.kind, c.line, c.target_routine_id, c.external, " +
+                        "tm.path AS target_module, tr.name AS target_routine, tr.module_id AS target_module_id " +
+                        "FROM calls c LEFT JOIN routines tr ON tr.id = c.target_routine_id " +
+                        "LEFT JOIN modules tm ON tm.id = tr.module_id " +
+                        "WHERE c.routine_id = ? ORDER BY c.line",
+                ).use { statement ->
+                    statement.setLong(1, routineId)
+                    statement.executeQuery().use { rows -> buildList { while (rows.next()) add(rows.toOutgoingCall()) } }
+                }
+        }
+
+    /** Кто вызывает процедуру. */
+    fun callsInto(routineId: Long): List<CallEdge> =
+        synchronized(lock) {
+            connection
+                .prepareStatement(
+                    "SELECT c.id, c.callee, c.qualifier, c.kind, c.line, c.target_routine_id, c.external, " +
+                        "m.path AS source_module, r.name AS source_routine " +
+                        "FROM calls c JOIN modules m ON m.id = c.module_id " +
+                        "LEFT JOIN routines r ON r.id = c.routine_id " +
+                        "WHERE c.target_routine_id = ? ORDER BY m.path, c.line",
+                ).use { statement ->
+                    statement.setLong(1, routineId)
+                    statement.executeQuery().use { rows -> buildList { while (rows.next()) add(rows.toIncomingCall()) } }
+                }
+        }
+
+    fun callsOfModule(moduleId: Long): List<CallEdge> =
+        synchronized(lock) {
+            connection
+                .prepareStatement(
+                    "SELECT c.id, c.callee, c.qualifier, c.kind, c.line, c.target_routine_id, c.external, " +
+                        "tm.path AS target_module, tr.name AS target_routine, tr.module_id AS target_module_id " +
+                        "FROM calls c LEFT JOIN routines tr ON tr.id = c.target_routine_id " +
+                        "LEFT JOIN modules tm ON tm.id = tr.module_id " +
+                        "WHERE c.module_id = ? ORDER BY c.line",
+                ).use { statement ->
+                    statement.setLong(1, moduleId)
+                    statement.executeQuery().use { rows -> buildList { while (rows.next()) add(rows.toOutgoingCall()) } }
+                }
+        }
+
+    fun callsIntoModule(moduleId: Long): List<CallEdge> =
+        synchronized(lock) {
+            connection
+                .prepareStatement(
+                    "SELECT c.id, c.callee, c.qualifier, c.kind, c.line, c.target_routine_id, c.external, " +
+                        "m.path AS source_module, r.name AS source_routine " +
+                        "FROM calls c JOIN routines tr ON tr.id = c.target_routine_id " +
+                        "JOIN modules m ON m.id = c.module_id LEFT JOIN routines r ON r.id = c.routine_id " +
+                        "WHERE tr.module_id = ? ORDER BY m.path, c.line",
+                ).use { statement ->
+                    statement.setLong(1, moduleId)
+                    statement.executeQuery().use { rows -> buildList { while (rows.next()) add(rows.toIncomingCall()) } }
+                }
+        }
+
+    /** Обращения к метаданным из процедуры. */
+    fun metadataRefsForRoutine(routineId: Long): List<MetadataRefRow> =
+        synchronized(lock) {
+            connection
+                .prepareStatement(
+                    "SELECT object_name, collection, context, line FROM metadata_refs " +
+                        "WHERE routine_id = ? ORDER BY line",
+                ).use { statement ->
+                    statement.setLong(1, routineId)
+                    statement.executeQuery().use { rows ->
+                        buildList {
+                            while (rows.next()) {
+                                add(
+                                    MetadataRefRow(
+                                        rows.getString("object_name"),
+                                        rows.getString("collection"),
+                                        rows.getString("context"),
+                                        rows.getInt("line"),
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+        }
+
+    fun metadataRefsForModule(moduleId: Long): List<MetadataRefRow> =
+        synchronized(lock) {
+            connection
+                .prepareStatement(
+                    "SELECT object_name, collection, context, line FROM metadata_refs " +
+                        "WHERE module_id = ? ORDER BY line",
+                ).use { statement ->
+                    statement.setLong(1, moduleId)
+                    statement.executeQuery().use { rows ->
+                        buildList {
+                            while (rows.next()) {
+                                add(
+                                    MetadataRefRow(
+                                        rows.getString("object_name"),
+                                        rows.getString("collection"),
+                                        rows.getString("context"),
+                                        rows.getInt("line"),
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+        }
+
     fun routines(moduleId: Long): List<DumpRoutine> =
         synchronized(lock) {
             connection
@@ -469,6 +596,112 @@ class DumpIndex(
             }
         }
 
+    /** Права ролей с фильтрами. */
+    fun rights(
+        role: String? = null,
+        metadata: String? = null,
+        condition: String? = null,
+        limit: Int = 200,
+    ): List<RoleRightRow> {
+        val conditions = mutableListOf<String>()
+        val parameters = mutableListOf<String>()
+        role?.takeIf { it.isNotBlank() }?.let {
+            conditions += "ro.name_lower = ?"
+            parameters += it.lowercase(Locale.ROOT)
+        }
+        metadata?.takeIf { it.isNotBlank() }?.let {
+            conditions += "rr.object_ref_lower = ?"
+            parameters += it.lowercase(Locale.ROOT)
+        }
+        condition?.takeIf { it.isNotBlank() }?.let {
+            conditions += "rr.condition LIKE ?"
+            parameters += "%$it%"
+        }
+        val where = if (conditions.isEmpty()) "" else "WHERE ${conditions.joinToString(" AND ")}"
+        return synchronized(lock) {
+            connection
+                .prepareStatement(
+                    "SELECT ro.name AS role, rr.object_ref, rr.right_name, rr.value, rr.condition " +
+                        "FROM role_rights rr JOIN roles ro ON ro.id = rr.role_id $where " +
+                        "ORDER BY ro.name, rr.object_ref, rr.right_name LIMIT ?",
+                ).use { statement ->
+                    var index = 1
+                    parameters.forEach { statement.setString(index++, it) }
+                    statement.setInt(index, limit.coerceIn(1, 1000))
+                    statement.executeQuery().use { rows ->
+                        buildList {
+                            while (rows.next()) {
+                                add(
+                                    RoleRightRow(
+                                        role = rows.getString("role"),
+                                        objectRef = rows.getString("object_ref"),
+                                        right = rows.getString("right_name"),
+                                        value = rows.getInt("value") == 1,
+                                        condition = rows.getString("condition"),
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+        }
+    }
+
+    fun roleNames(): List<String> =
+        synchronized(lock) {
+            connection.createStatement().use { statement ->
+                statement.executeQuery("SELECT name FROM roles ORDER BY name").use { rows ->
+                    buildList { while (rows.next()) add(rows.getString("name")) }
+                }
+            }
+        }
+
+    /** Кандидаты для поиска похожих процедур по общим вызовам. */
+    fun routineIdsByCalls(
+        names: List<String>,
+        limit: Int = 1000,
+    ): List<Long> {
+        if (names.isEmpty()) return emptyList()
+        val placeholders = names.joinToString(",") { "?" }
+        return synchronized(lock) {
+            connection
+                .prepareStatement(
+                    "SELECT DISTINCT routine_id FROM calls WHERE callee_lower IN ($placeholders) " +
+                        "AND routine_id IS NOT NULL LIMIT ?",
+                ).use { statement ->
+                    var index = 1
+                    names.forEach { statement.setString(index++, it.lowercase(Locale.ROOT)) }
+                    statement.setInt(index, limit.coerceIn(1, 5000))
+                    statement.executeQuery().use { rows ->
+                        buildList { while (rows.next()) add(rows.getLong(1)) }
+                    }
+                }
+        }
+    }
+
+    /** Кандидаты для поиска похожих процедур по общим объектам метаданных. */
+    fun routineIdsByMetadata(
+        names: List<String>,
+        limit: Int = 1000,
+    ): List<Long> {
+        if (names.isEmpty()) return emptyList()
+        val placeholders = names.joinToString(",") { "?" }
+        return synchronized(lock) {
+            connection
+                .prepareStatement(
+                    "SELECT DISTINCT routine_id FROM metadata_refs WHERE object_name_lower IN ($placeholders) " +
+                        "AND routine_id IS NOT NULL LIMIT ?",
+                ).use { statement ->
+                    var index = 1
+                    names.forEach { statement.setString(index++, it.lowercase(Locale.ROOT)) }
+                    statement.setInt(index, limit.coerceIn(1, 5000))
+                    statement.executeQuery().use { rows ->
+                        buildList { while (rows.next()) add(rows.getLong(1)) }
+                    }
+                }
+        }
+    }
+
     override fun close() {
         runCatching { connection.close() }
     }
@@ -508,6 +741,38 @@ class DumpIndex(
             bytes = getLong("bytes"),
         )
 
+    private fun java.sql.ResultSet.toOutgoingCall() =
+        CallEdge(
+            id = getLong("id"),
+            callee = getString("callee"),
+            qualifier = getString("qualifier"),
+            kind = getString("kind"),
+            line = getInt("line"),
+            targetRoutineId = longOrNull("target_routine_id"),
+            external = getString("external"),
+            sourceModule = null,
+            sourceRoutine = null,
+            targetModule = getString("target_module"),
+            targetRoutine = getString("target_routine"),
+        )
+
+    private fun java.sql.ResultSet.toIncomingCall() =
+        CallEdge(
+            id = getLong("id"),
+            callee = getString("callee"),
+            qualifier = getString("qualifier"),
+            kind = getString("kind"),
+            line = getInt("line"),
+            targetRoutineId = longOrNull("target_routine_id"),
+            external = getString("external"),
+            sourceModule = getString("source_module"),
+            sourceRoutine = getString("source_routine"),
+            targetModule = null,
+            targetRoutine = null,
+        )
+
+    private fun java.sql.ResultSet.longOrNull(column: String): Long? = (getObject(column) as? Number)?.toLong()
+
     private fun java.sql.ResultSet.toRoutine() =
         DumpRoutine(
             id = getLong("id"),
@@ -523,9 +788,9 @@ class DumpIndex(
     companion object {
         /**
          * Версия схемы индекса выгрузки: поднимать при изменении таблиц или правил разбора.
-         * v5 — пунктуация в строках не путается с вызовами, ссылки на методы коллекций не считаются объектами.
+         * v7 — права ролей и условия RLS.
          */
-        const val SCHEMA_VERSION = 5
+        const val SCHEMA_VERSION = 7
 
         fun likePattern(query: String): String {
             val escaped =
@@ -579,4 +844,36 @@ data class EntryPointRow(
     val event: String?,
     val path: String?,
     val sources: List<String> = emptyList(),
+)
+
+/** Ребро графа вызовов. */
+data class CallEdge(
+    val id: Long,
+    val callee: String,
+    val qualifier: String?,
+    val kind: String,
+    val line: Int,
+    val targetRoutineId: Long?,
+    val external: String?,
+    val sourceModule: String?,
+    val sourceRoutine: String?,
+    val targetModule: String?,
+    val targetRoutine: String?,
+)
+
+/** Обращение к метаданным из конкретного места. */
+data class MetadataRefRow(
+    val objectName: String,
+    val collection: String,
+    val context: String,
+    val line: Int,
+)
+
+/** Право роли в ответе инструмента. */
+data class RoleRightRow(
+    val role: String,
+    val objectRef: String,
+    val right: String,
+    val value: Boolean,
+    val condition: String?,
 )

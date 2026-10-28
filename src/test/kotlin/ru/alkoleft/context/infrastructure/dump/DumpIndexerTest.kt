@@ -72,7 +72,7 @@ class DumpIndexerTest {
             val routine = assertNotNull(index.routineAt("Catalogs/Товары/Ext/ObjectModule.bsl", 2))
             assertEquals("ПередЗаписью", routine.name)
             assertEquals(1, routine.startLine)
-            assertEquals(5, routine.endLine)
+            assertEquals(6, routine.endLine)
         }
     }
 

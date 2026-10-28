@@ -237,10 +237,7 @@ class DumpService(
                 else -> throw InvalidSearchQueryException("укажите path или id модуля")
             }
 
-        val root = dumpRoot()
-        val file = root.resolve(module.path).normalize()
-        if (!file.startsWith(root)) throw InvalidSearchQueryException("путь выходит за пределы выгрузки")
-        if (!Files.isRegularFile(file)) throw DefinitionNotFoundException("файл «${module.path}»")
+        val file = storage.file(module.path) ?: throw DefinitionNotFoundException("файл «${module.path}»")
 
         val text = DumpTextReader.read(file)
         val lines = text.split('\n')
@@ -307,7 +304,7 @@ class DumpService(
                 break
             }
             val text =
-                runCatching { DumpTextReader.read(root.resolve(relative)) }
+                runCatching { storage.file(relative)?.let { DumpTextReader.read(it) } }
                     .getOrNull()
                     ?: continue
             scanned++
@@ -393,7 +390,7 @@ class DumpService(
         )
     }
 
-    private fun dumpRoot(): Path = Path.of(storage.currentPath() ?: throw DumpNotOpenException()).toAbsolutePath().normalize()
+    private fun dumpRoot(): Path = storage.roots().firstOrNull() ?: throw DumpNotOpenException()
 
     private fun relativePath(path: String): String =
         path

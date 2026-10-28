@@ -9,23 +9,57 @@
 ## Сборка
 
 ```bash
-./gradlew bootJar
+./gradlew clean bootJar
 # build/libs/mcp-bsl-context-<версия>.jar
 ```
 
+`clean` нужен, чтобы в `build/libs` не накапливались jar прошлых версий: имя содержит версию и
+коммит, поэтому после смены ветки файлов становится несколько, а маска `*.jar` подставляет их все.
+
 ## Запуск
 
+**bash (Linux, macOS, Git Bash):**
+
 ```bash
+jar=$(ls -t build/libs/mcp-bsl-context-*.jar | head -1)
+
 # платформа в стандартном каталоге — путь можно не указывать
-java -Dfile.encoding=UTF-8 -jar build/libs/mcp-bsl-context-*.jar
+java -Dfile.encoding=UTF-8 -jar "$jar"
 
 # явный путь: каталог установки, каталог версии или сам .hbk
-java -Dfile.encoding=UTF-8 -jar build/libs/mcp-bsl-context-*.jar \
+java -Dfile.encoding=UTF-8 -jar "$jar" \
+  --platform-path "/opt/1cv8/x86_64/8.3.27.2214"
+
+# конкретная версия и язык
+java -Dfile.encoding=UTF-8 -jar "$jar" --version 8.3.27 --locale ru
+```
+
+**PowerShell (Windows):**
+
+```powershell
+$jar = (Get-ChildItem build/libs/mcp-bsl-context-*.jar |
+        Sort-Object LastWriteTime | Select-Object -Last 1).FullName
+
+# платформа в стандартном каталоге — путь можно не указывать
+java "-Dfile.encoding=UTF-8" -jar $jar
+
+# явный путь: каталог установки, каталог версии или сам .hbk
+java "-Dfile.encoding=UTF-8" -jar $jar `
   --platform-path "C:\Program Files\1cv8\8.3.27.2214"
 
 # конкретная версия и язык
-java -Dfile.encoding=UTF-8 -jar build/libs/mcp-bsl-context-*.jar --version 8.3.27 --locale ru
+java "-Dfile.encoding=UTF-8" -jar $jar --version 8.3.27 --locale ru
 ```
+
+В PowerShell ключ `-D...` обязательно в кавычках: литеральный аргумент вида `-имя.имя` оболочка
+разбирает на два (`-Dfile` и `.encoding=UTF-8`), и Java сообщает
+`Could not find or load main class .encoding=UTF-8`. Продолжение строки — обратный апостроф
+(`` ` ``), а не `\`: с `\` PowerShell выдаёт `Отсутствует выражение после унарного оператора "--"`.
+Маску `*.jar` PowerShell в аргументах внешних программ не раскрывает — подставляйте конкретный путь,
+как в сниппете выше.
+
+В режиме stdio процесс запускает MCP-клиент и stdout принадлежит протоколу, поэтому при ручном
+запуске сервер просто ждёт JSON-RPC на stdin. Для проверки используйте `--help` или `--benchmark`.
 
 ## Параметры
 
@@ -65,7 +99,12 @@ java -Dfile.encoding=UTF-8 -jar build/libs/mcp-bsl-context-*.jar --version 8.3.2
 | `DUMP_INDEX_DIR` | каталог индексов выгрузки |
 | `DUMP_WARMUP` | `false` — не строить индекс при старте |
 | `DUMP_WAIT_TIMEOUT_MS` | ожидание готовности индекса (по умолчанию 60000) |
+| `DUMP_WATCH_SECONDS` | проверять изменения выгрузки каждые N секунд (0 — выключено) |
 | `LOG_FILE` | файл лога (по умолчанию `mcp-server.log`) |
+
+`DUMP_PATH` (и `--dump`) принимает несколько каталогов через `;`: первый — база, следующие —
+расширения. Файл расширения перекрывает файл базы с тем же относительным путём.
+`DUMP_WATCH_SECONDS` перестраивает индекс при изменении `ConfigDumpInfo.xml` (полная переиндексация).
 
 Пример:
 

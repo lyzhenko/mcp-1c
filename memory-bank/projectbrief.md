@@ -10,9 +10,10 @@ MCP-сервер (Model Context Protocol) для 1С:Предприятие. Д�
 
 ## Возможности
 
-- 14 инструментов: `search`, `info`, `getMember`, `getMembers`, `getConstructors`, `status`,
+- 20 инструментов: `search`, `info`, `getMember`, `getMembers`, `getConstructors`, `status`,
   `dumpOpen`, `dumpSearch`, `dumpMetadata`, `dumpCode`, `dumpGrep`, `dumpEntrypoints`,
-  `dumpCheck`, `dumpReload`.
+  `dumpCheck`, `dumpNode`, `dumpNeighbors`, `dumpTypes`, `dumpRights`, `dumpSimilar`,
+  `dumpConventions`, `dumpReload`.
 - Структурная модель справки: сигнатуры, параметры, возвращаемые типы, примеры, конструкторы,
   значения перечислений.
 - SQLite-индекс выгрузки: объекты, реквизиты, табличные части, формы, модули, процедуры.
@@ -44,5 +45,5 @@ MCP-сервер (Model Context Protocol) для 1С:Предприятие. Д�
 
 ## Проверка
 
-`./gradlew test -PPLATFORM_PATH=<путь>` — 114 тестов, включая интеграционные на реальной справке
+`./gradlew test -PPLATFORM_PATH=<путь>` — 120 тестов, включая интеграционные на реальной справке
 и тесты выгрузки на синтетическом дампе; `./gradlew ktlintCheck`; `--benchmark` для замеров.

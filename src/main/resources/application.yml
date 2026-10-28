@@ -59,6 +59,8 @@ dump:
   warmup: ${DUMP_WARMUP:true}
   # Сколько инструмент ждёт готовности индекса
   wait-timeout-ms: ${DUMP_WAIT_TIMEOUT_MS:60000}
+  # Проверять изменения выгрузки каждые N секунд (0 — выключено)
+  watch-seconds: ${DUMP_WATCH_SECONDS:0}
 
 # Настройки логирования
 logging:

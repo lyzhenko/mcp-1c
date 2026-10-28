@@ -11,6 +11,10 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.env.Environment
 import ru.alkoleft.context.business.services.DumpCheckService
+import ru.alkoleft.context.business.services.DumpConventionsService
+import ru.alkoleft.context.business.services.DumpGraphService
+import ru.alkoleft.context.business.services.DumpRightsService
+import ru.alkoleft.context.business.services.DumpSimilarService
 import ru.alkoleft.context.infrastructure.dump.DumpOptions
 import ru.alkoleft.context.infrastructure.dump.DumpStorage
 import ru.alkoleft.context.infrastructure.platform.PlatformOptions
@@ -30,6 +34,7 @@ class DumpConfiguration {
             indexDir = environment.getProperty("dump.index-dir")?.takeIf { it.isNotBlank() },
             warmup = environment.getProperty("dump.warmup", Boolean::class.java, true),
             waitTimeoutMs = environment.getProperty("dump.wait-timeout-ms", Long::class.java, 60_000),
+            watchSeconds = environment.getProperty("dump.watch-seconds", Long::class.java, 0),
         )
 
     @Bean
@@ -43,6 +48,18 @@ class DumpConfiguration {
         DumpCheckService(storage) {
             runCatching { catalogProvider.catalog() }.getOrNull()
         }
+
+    @Bean
+    fun dumpGraphService(storage: DumpStorage): DumpGraphService = DumpGraphService(storage)
+
+    @Bean
+    fun dumpRightsService(storage: DumpStorage): DumpRightsService = DumpRightsService(storage)
+
+    @Bean
+    fun dumpSimilarService(storage: DumpStorage): DumpSimilarService = DumpSimilarService(storage)
+
+    @Bean
+    fun dumpConventionsService(storage: DumpStorage): DumpConventionsService = DumpConventionsService(storage)
 
     @Bean
     fun dumpJsonService(options: PlatformOptions): DumpJsonService = DumpJsonService(JsonPager(options.responseLimit))

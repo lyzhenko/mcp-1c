@@ -10,12 +10,21 @@ package ru.alkoleft.context.presentation.formatters
 import ru.alkoleft.context.business.entities.DumpField
 import ru.alkoleft.context.business.entities.DumpRoutine
 import ru.alkoleft.context.business.services.CheckResult
+import ru.alkoleft.context.business.services.ConventionsResult
 import ru.alkoleft.context.business.services.DumpCodeResult
 import ru.alkoleft.context.business.services.DumpMetadataCard
 import ru.alkoleft.context.business.services.DumpSearchItem
 import ru.alkoleft.context.business.services.DumpSearchPage
 import ru.alkoleft.context.business.services.EntryPointPage
+import ru.alkoleft.context.business.services.GraphEdge
+import ru.alkoleft.context.business.services.GraphNode
 import ru.alkoleft.context.business.services.GrepResult
+import ru.alkoleft.context.business.services.MetadataRefRowView
+import ru.alkoleft.context.business.services.NeighborsResult
+import ru.alkoleft.context.business.services.RightsPage
+import ru.alkoleft.context.business.services.SimilarPage
+import ru.alkoleft.context.business.services.TypeSymbol
+import ru.alkoleft.context.business.services.TypesResult
 import ru.alkoleft.context.infrastructure.dump.DumpSnapshot
 import ru.alkoleft.context.infrastructure.dump.DumpStorage
 import ru.alkoleft.context.infrastructure.dump.UsageSummary
@@ -294,6 +303,207 @@ class DumpJsonService(
                     ).withoutNulls()
                 },
         )
+
+    /** Карточка узла графа. */
+    fun node(node: GraphNode): String =
+        pager.fit(
+            linkedMapOf<String, Any?>(
+                "id" to node.id,
+                "kind" to node.kind,
+                "name" to node.name,
+                "owner" to node.owner,
+                "path" to node.path,
+                "moduleKind" to node.moduleKind,
+                "export" to node.export,
+                "lines" to node.startLine?.let { "$it-${node.endLine}" },
+                "parameters" to node.parameters.takeIf { it.isNotEmpty() },
+                "routines" to
+                    node.routines
+                        .map {
+                            linkedMapOf<String, Any?>(
+                                "id" to "routine:${it.id}",
+                                "name" to it.name,
+                                "kind" to it.kind,
+                                "export" to it.export,
+                                "parameters" to it.parameters.takeIf { value -> value.isNotBlank() },
+                                "lines" to "${it.startLine}-${it.endLine}",
+                            ).withoutNulls()
+                        }.takeIf { it.isNotEmpty() },
+                "usages" to node.usages?.let(::usageNode),
+                "hint" to
+                    if (node.kind == "routine" || node.kind == "module") {
+                        "Связи — dumpNeighbors(id=…); таблица символов — dumpTypes."
+                    } else {
+                        "Карточка объекта — dumpMetadata."
+                    },
+            ).withoutNulls(),
+        )
+
+    /** Входящие/исходящие вызовы и обращения к метаданным. */
+    fun neighbors(result: NeighborsResult): String =
+        pager.page(
+            header =
+                linkedMapOf<String, Any?>(
+                    "id" to result.id,
+                    "node" to
+                        linkedMapOf<String, Any?>(
+                            "kind" to result.node.kind,
+                            "name" to result.node.name,
+                            "owner" to result.node.owner,
+                            "path" to result.node.path,
+                            "lines" to result.node.startLine?.let { "${result.node.startLine}-${result.node.endLine}" },
+                        ).withoutNulls(),
+                    "counts" to result.counts,
+                ),
+            items = result.incoming + result.outgoing + result.metadata,
+            offset = 0,
+            total = result.incoming.size + result.outgoing.size + result.metadata.size,
+            render = { item ->
+                when (item) {
+                    is GraphEdge ->
+                        linkedMapOf<String, Any?>(
+                            "edge" to item.direction,
+                            "kind" to item.kind,
+                            "name" to item.name,
+                            "line" to item.line,
+                            "sourceModule" to item.sourceModule,
+                            "sourceRoutine" to item.sourceRoutine,
+                            "targetModule" to item.targetModule,
+                            "targetRoutine" to item.targetRoutine,
+                            "targetId" to item.targetId,
+                            "external" to item.external,
+                        ).withoutNulls()
+                    is MetadataRefRowView ->
+                        linkedMapOf<String, Any?>(
+                            "edge" to "metadata",
+                            "object" to item.objectName,
+                            "collection" to item.collection,
+                            "context" to item.context,
+                            "line" to item.line,
+                        )
+                    else -> emptyMap()
+                }
+            },
+            hint = "Направление: in, out, both; kinds: calls, metadata; limit 1–500.",
+        )
+
+    /** Таблица символов модуля. */
+    fun types(result: TypesResult): String =
+        pager.fit(
+            linkedMapOf<String, Any?>(
+                "path" to result.path,
+                "lines" to result.lines,
+                "moduleLocals" to result.moduleLocals.map(::symbolNode).takeIf { it.isNotEmpty() },
+                "routines" to
+                    result.routines.map { routine ->
+                        linkedMapOf<String, Any?>(
+                            "name" to routine.name,
+                            "kind" to routine.kind,
+                            "export" to routine.export,
+                            "parameters" to routine.parameters.map(::symbolNode).takeIf { it.isNotEmpty() },
+                            "locals" to routine.locals.map(::symbolNode).takeIf { it.isNotEmpty() },
+                            "calls" to
+                                routine.calls
+                                    .map {
+                                        linkedMapOf<String, Any?>(
+                                            "name" to it.name,
+                                            "qualifier" to it.qualifier,
+                                            "line" to it.line,
+                                            "arguments" to it.arguments,
+                                        ).withoutNulls()
+                                    }.takeIf { it.isNotEmpty() },
+                        ).withoutNulls()
+                    },
+                "hint" to "Тип выводится по правой части присваивания; отсутствие type — тип не определён.",
+            ).withoutNulls(),
+        )
+
+    /** Права ролей. */
+    fun rights(page: RightsPage): String =
+        pager.page(
+            header =
+                linkedMapOf<String, Any?>(
+                    "role" to page.role,
+                    "metadata" to page.metadata,
+                    "condition" to page.condition,
+                    "total" to page.total,
+                    "roles" to page.roles,
+                ).withoutNulls(),
+            items = page.items,
+            offset = 0,
+            total = page.total,
+            render = { right ->
+                linkedMapOf<String, Any?>(
+                    "role" to right.role,
+                    "object" to right.objectRef,
+                    "right" to right.right,
+                    "value" to right.value,
+                    "condition" to right.condition,
+                ).withoutNulls()
+            },
+            hint = "Фильтры: role, metadata, condition; limit 1–1000.",
+        )
+
+    /** Похожие процедуры. */
+    fun similar(page: SimilarPage): String =
+        pager.page(
+            header =
+                linkedMapOf<String, Any?>(
+                    "source" to page.source,
+                    "targetRoutines" to page.targetRoutines,
+                    "total" to page.items.size,
+                ),
+            items = page.items,
+            offset = 0,
+            total = page.items.size,
+            render = { item ->
+                linkedMapOf<String, Any?>(
+                    "id" to "routine:${item.id}",
+                    "name" to item.name,
+                    "module" to item.module,
+                    "lines" to item.lines,
+                    "score" to item.score,
+                    "sharedCalls" to item.sharedCalls.takeIf { it.isNotEmpty() },
+                    "sharedMetadata" to item.sharedMetadata.takeIf { it.isNotEmpty() },
+                ).withoutNulls()
+            },
+            hint = "Похожесть — эвристика по общим вызовам и метаданным.",
+        )
+
+    /** Конвенции кода. */
+    fun conventions(result: ConventionsResult): String =
+        pager.page(
+            header =
+                linkedMapOf<String, Any?>(
+                    "path" to result.path,
+                    "lines" to result.lines,
+                    "total" to result.findings.size,
+                    "catalog" to
+                        result.catalog.map {
+                            mapOf("code" to it.code, "title" to it.title, "severity" to it.severity)
+                        },
+                ),
+            items = result.findings,
+            offset = 0,
+            total = result.findings.size,
+            render = { finding ->
+                linkedMapOf<String, Any?>(
+                    "code" to finding.code,
+                    "severity" to finding.severity,
+                    "line" to finding.line,
+                    "message" to finding.message,
+                    "hint" to finding.hint,
+                )
+            },
+            hint = "Конвенции — эвристики, а не линтер платформы.",
+        )
+
+    private fun symbolNode(symbol: TypeSymbol): Map<String, Any?> =
+        linkedMapOf<String, Any?>(
+            "name" to symbol.name,
+            "line" to symbol.line,
+            "type" to symbol.type,
+        ).withoutNulls()
 
     private fun fieldNode(field: DumpField): Map<String, Any?> =
         linkedMapOf<String, Any?>(

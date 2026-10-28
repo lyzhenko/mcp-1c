@@ -30,6 +30,7 @@ data class DumpOptions(
     val indexDir: String? = null,
     val warmup: Boolean = true,
     val waitTimeoutMs: Long = 60_000,
+    val watchSeconds: Long = 0,
 )
 
 /**
@@ -92,6 +93,12 @@ class DumpStorage(
     @Volatile
     private var finishedAt: Long = 0
 
+    @Volatile
+    private var watcher: Thread? = null
+
+    @Volatile
+    private var lastSignature: String = ""
+
     /** Открыть выгрузку из `--dump`, если она задана. */
     @PostConstruct
     fun init() {
@@ -100,33 +107,42 @@ class DumpStorage(
 
     /** Открыть (или переоткрыть) выгрузку; повторный вызов для того же пути переиспользует индекс. */
     fun open(path: String) {
-        val normalized = Path.of(path).toAbsolutePath().normalize()
-        if (!Files.isDirectory(normalized)) {
+        val paths =
+            path
+                .split(';')
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .map { Path.of(it).toAbsolutePath().normalize() }
+        if (paths.isEmpty() || paths.any { !Files.isDirectory(it) }) {
             synchronized(monitor) {
                 state = State.FAILED
-                error = "Каталог выгрузки не найден: $normalized"
+                error = "Каталог выгрузки не найден: $path"
                 monitor.notifyAll()
             }
             return
         }
+        val key = paths.joinToString(";")
 
         synchronized(monitor) {
-            if (dumpPath == normalized.toString() && state == State.READY) return
-            dumpPath = normalized.toString()
+            if (dumpPath == key && state == State.READY) return
+            dumpPath = key
             state = State.LOADING
             startedAt = System.currentTimeMillis()
             finishedAt = 0
             error = null
             progress = null
             info = null
-            val thread = Thread({ load(normalized, indexFile(normalized)) }, "dump-indexer").apply { isDaemon = true }
+            val thread =
+                Thread({ load(paths, key, indexFile(key)) }, "dump-indexer").apply { isDaemon = true }
             thread.start()
+            startWatcher()
         }
     }
 
     /** Перестроить индекс текущей выгрузки. */
     fun reload() {
         val path = dumpPath ?: return
+        val paths = path.split(';').map { Path.of(it) }
         synchronized(monitor) {
             state = State.LOADING
             startedAt = System.currentTimeMillis()
@@ -134,7 +150,8 @@ class DumpStorage(
             error = null
             progress = null
             info = null
-            val thread = Thread({ load(Path.of(path), indexFile(Path.of(path))) }, "dump-indexer").apply { isDaemon = true }
+            val thread =
+                Thread({ load(paths, path, indexFile(path)) }, "dump-indexer").apply { isDaemon = true }
             thread.start()
         }
     }
@@ -171,14 +188,24 @@ class DumpStorage(
                         State.READY -> finishedAt - startedAt
                         else -> 0
                     },
-                indexFile = dumpPath?.let { indexFile(Path.of(it)) },
-                indexBytes = dumpPath?.let { runCatching { Files.size(indexFile(Path.of(it))) }.getOrDefault(0) } ?: 0,
+                indexFile = dumpPath?.let { indexFile(it) },
+                indexBytes = dumpPath?.let { runCatching { Files.size(indexFile(it)) }.getOrDefault(0) } ?: 0,
             )
         }
 
     fun currentInfo(): DumpInfo? = info
 
     fun currentPath(): String? = dumpPath
+
+    /** Каталоги выгрузки: базовый и расширения. */
+    fun roots(): List<Path> = dumpPath?.split(';')?.map { Path.of(it) } ?: emptyList()
+
+    /** Файл по относительному пути с учётом расширений (последний слой важнее). */
+    fun file(relative: String): Path? =
+        roots().asReversed().firstNotNullOfOrNull { root ->
+            val candidate = root.resolve(relative).normalize()
+            candidate.takeIf { it.startsWith(root) && Files.isRegularFile(it) }
+        }
 
     /** Закрыть индекс (в тестах и при остановке приложения Windows отпускает файл). */
     override fun close() {
@@ -190,12 +217,46 @@ class DumpStorage(
         }
     }
 
+    private fun startWatcher() {
+        if (options.watchSeconds <= 0 || watcher?.isAlive == true) return
+        watcher =
+            Thread(
+                {
+                    while (!Thread.currentThread().isInterrupted) {
+                        try {
+                            Thread.sleep(options.watchSeconds.coerceAtLeast(5) * 1000)
+                            val roots = roots()
+                            if (roots.isEmpty()) continue
+                            val signature =
+                                roots.joinToString("|") { root ->
+                                    runCatching {
+                                        Files.getLastModifiedTime(root.resolve("ConfigDumpInfo.xml")).toMillis()
+                                    }.getOrDefault(0L).toString()
+                                }
+                            if (lastSignature.isNotEmpty() && signature != lastSignature) {
+                                logger.info { "Выгрузка изменилась, перестраиваю индекс" }
+                                reload()
+                            }
+                            lastSignature = signature
+                        } catch (_: InterruptedException) {
+                            return@Thread
+                        } catch (failure: Throwable) {
+                            logger.warn { "Наблюдение за выгрузкой: ${failure.message}" }
+                        }
+                    }
+                },
+                "dump-watch",
+            ).apply { isDaemon = true }
+        watcher?.start()
+    }
+
     private fun load(
-        path: Path,
+        paths: List<Path>,
+        key: String,
         indexFile: Path,
     ) {
         try {
-            val existing = openExisting(path, indexFile)
+            val existing = openExisting(key, indexFile)
             if (existing != null) {
                 synchronized(monitor) {
                     index?.close()
@@ -210,7 +271,7 @@ class DumpStorage(
             }
 
             val built =
-                indexer.build(path, indexFile) { update ->
+                indexer.build(paths.first(), indexFile, paths.drop(1)) { update ->
                     synchronized(monitor) { progress = update }
                 }
             val opened = DumpIndex(indexFile)
@@ -235,7 +296,7 @@ class DumpStorage(
     }
 
     private fun openExisting(
-        path: Path,
+        key: String,
         indexFile: Path,
     ): DumpIndex? {
         if (!Files.isRegularFile(indexFile)) return null
@@ -247,7 +308,7 @@ class DumpStorage(
                 }
         val info = candidate.info()
         val valid =
-            info.path == path.toString() &&
+            info.path == key &&
                 info.schema == DumpIndex.SCHEMA_VERSION &&
                 info.objects > 0
         if (!valid) {
@@ -258,11 +319,11 @@ class DumpStorage(
         return candidate
     }
 
-    private fun indexFile(path: Path): Path {
+    private fun indexFile(key: String): Path {
         val directory =
             options.indexDir?.takeIf { it.isNotBlank() }?.let { Path.of(it) }
                 ?: PlatformCache.defaultDirectory().resolve("dumps")
-        return directory.resolve("dump-${sha1(path.toString()).take(12)}.db")
+        return directory.resolve("dump-${sha1(key).take(12)}.db")
     }
 
     private fun sha1(value: String): String =

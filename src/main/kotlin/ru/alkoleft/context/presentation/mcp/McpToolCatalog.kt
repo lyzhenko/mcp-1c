@@ -28,6 +28,12 @@ object McpToolCatalog {
             "dumpGrep",
             "dumpEntrypoints",
             "dumpCheck",
+            "dumpNode",
+            "dumpNeighbors",
+            "dumpTypes",
+            "dumpRights",
+            "dumpSimilar",
+            "dumpConventions",
             "dumpReload",
             "status",
         )

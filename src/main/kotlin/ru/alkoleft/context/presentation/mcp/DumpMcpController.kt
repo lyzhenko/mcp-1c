@@ -12,7 +12,11 @@ import org.springframework.ai.tool.annotation.Tool
 import org.springframework.ai.tool.annotation.ToolParam
 import org.springframework.stereotype.Service
 import ru.alkoleft.context.business.services.DumpCheckService
+import ru.alkoleft.context.business.services.DumpConventionsService
+import ru.alkoleft.context.business.services.DumpGraphService
+import ru.alkoleft.context.business.services.DumpRightsService
 import ru.alkoleft.context.business.services.DumpService
+import ru.alkoleft.context.business.services.DumpSimilarService
 import ru.alkoleft.context.exceptions.DefinitionNotFoundException
 import ru.alkoleft.context.exceptions.DomainException
 import ru.alkoleft.context.exceptions.DumpNotOpenException
@@ -33,6 +37,10 @@ private val logger = KotlinLogging.logger {}
 class DumpMcpController(
     private val dumpService: DumpService,
     private val checkService: DumpCheckService,
+    private val graphService: DumpGraphService,
+    private val rightsService: DumpRightsService,
+    private val similarService: DumpSimilarService,
+    private val conventionsService: DumpConventionsService,
     private val formatter: DumpJsonService,
 ) {
     @Tool(
@@ -198,6 +206,131 @@ class DumpMcpController(
     ): String =
         respond("dumpCheck") {
             formatter.check(checkService.check(path, id, text))
+        }
+
+    @Tool(
+        name = "dumpNode",
+        description =
+            "Карточка узла графа: процедура (routine:<id>), модуль (module:<id>), объект метаданных " +
+                "(Catalog.Номенклатура) или внешний вызов (external:Имя).",
+        resultConverter = RawJsonResultConverter::class,
+    )
+    fun dumpNode(
+        @ToolParam(description = "Идентификатор узла: routine:123, module:45, Catalog.Номенклатура.")
+        id: String,
+    ): String =
+        respond("dumpNode") {
+            formatter.node(graphService.node(id))
+        }
+
+    @Tool(
+        name = "dumpNeighbors",
+        description =
+            "Связи узла: входящие и исходящие вызовы, обращения к метаданным. " +
+                "direction — in, out, both; kinds — calls, metadata.",
+        resultConverter = RawJsonResultConverter::class,
+    )
+    fun dumpNeighbors(
+        @ToolParam(description = "Идентификатор узла: routine:123, module:45, Catalog.Номенклатура.")
+        id: String,
+        @ToolParam(description = "Направление: in, out, both (по умолчанию both).", required = false)
+        direction: String? = null,
+        @ToolParam(description = "Виды связей через запятую: calls, metadata.", required = false)
+        kinds: String? = null,
+        @ToolParam(description = "Сколько связей вернуть: 1–500, по умолчанию 100.", required = false)
+        limit: Int? = null,
+    ): String =
+        respond("dumpNeighbors") {
+            formatter.neighbors(
+                graphService.neighbors(
+                    id = id,
+                    direction = direction,
+                    kinds = kinds?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() },
+                    limit = limit,
+                ),
+            )
+        }
+
+    @Tool(
+        name = "dumpTypes",
+        description =
+            "Таблица символов модуля: параметры, локальные переменные с простым выводом типа и вызовы. " +
+                "Аргументы: path или id модуля, либо text черновика.",
+        resultConverter = RawJsonResultConverter::class,
+    )
+    fun dumpTypes(
+        @ToolParam(description = "Путь модуля в выгрузке.", required = false)
+        path: String? = null,
+        @ToolParam(description = "Идентификатор модуля из dumpMetadata.", required = false)
+        id: Long? = null,
+        @ToolParam(description = "Текст черновика.", required = false)
+        text: String? = null,
+    ): String =
+        respond("dumpTypes") {
+            formatter.types(graphService.types(path, id, text))
+        }
+
+    @Tool(
+        name = "dumpRights",
+        description =
+            "Права ролей и условия RLS: role — имя роли, metadata — Catalog.Номенклатура, " +
+                "condition — подстрока условия ограничения.",
+        resultConverter = RawJsonResultConverter::class,
+    )
+    fun dumpRights(
+        @ToolParam(description = "Имя роли; не задано — все роли.", required = false)
+        role: String? = null,
+        @ToolParam(description = "Объект метаданных: Catalog.Номенклатура.", required = false)
+        metadata: String? = null,
+        @ToolParam(description = "Подстрока условия RLS.", required = false)
+        condition: String? = null,
+        @ToolParam(description = "Сколько прав вернуть: 1–1000, по умолчанию 200.", required = false)
+        limit: Int? = null,
+    ): String =
+        respond("dumpRights") {
+            formatter.rights(rightsService.rights(role, metadata, condition, limit))
+        }
+
+    @Tool(
+        name = "dumpSimilar",
+        description =
+            "Похожие процедуры по общим вызовам и объектам метаданных. Источник — path/id модуля " +
+                "или text черновика; routine — имя процедуры внутри модуля.",
+        resultConverter = RawJsonResultConverter::class,
+    )
+    fun dumpSimilar(
+        @ToolParam(description = "Путь модуля в выгрузке.", required = false)
+        path: String? = null,
+        @ToolParam(description = "Идентификатор модуля из dumpMetadata.", required = false)
+        id: Long? = null,
+        @ToolParam(description = "Текст черновика.", required = false)
+        text: String? = null,
+        @ToolParam(description = "Имя процедуры в модуле.", required = false)
+        routine: String? = null,
+        @ToolParam(description = "Сколько результатов вернуть: 1–100, по умолчанию 20.", required = false)
+        limit: Int? = null,
+    ): String =
+        respond("dumpSimilar") {
+            formatter.similar(similarService.similar(path, id, text, routine, limit))
+        }
+
+    @Tool(
+        name = "dumpConventions",
+        description =
+            "Проверка конвенций кода 1С: «Сообщить» на сервере, запрос/запись в цикле, " +
+                "«Попытка» без «Исключение», «ВызватьИсключение» без текста, TODO.",
+        resultConverter = RawJsonResultConverter::class,
+    )
+    fun dumpConventions(
+        @ToolParam(description = "Путь модуля в выгрузке.", required = false)
+        path: String? = null,
+        @ToolParam(description = "Идентификатор модуля из dumpMetadata.", required = false)
+        id: Long? = null,
+        @ToolParam(description = "Текст черновика.", required = false)
+        text: String? = null,
+    ): String =
+        respond("dumpConventions") {
+            formatter.conventions(conventionsService.conventions(path, id, text))
         }
 
     @Tool(

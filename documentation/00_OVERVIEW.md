@@ -39,10 +39,21 @@ MCP-сервер отдаёт AI-ассистенту две вещи:
 ## Быстрый старт
 
 ```bash
-./gradlew bootJar
-java -Dfile.encoding=UTF-8 -jar build/libs/mcp-bsl-context-*.jar \
+./gradlew clean bootJar
+jar=$(ls -t build/libs/mcp-bsl-context-*.jar | head -1)
+java -Dfile.encoding=UTF-8 -jar "$jar" \
   --platform-path "/path/to/1cv8/8.3.27.2214" \
   --dump "/path/to/dump"
+```
+
+В PowerShell те же ключи, но `-D...` в кавычках и продолжение строки — обратный апостроф:
+
+```powershell
+$jar = (Get-ChildItem build/libs/mcp-bsl-context-*.jar |
+        Sort-Object LastWriteTime | Select-Object -Last 1).FullName
+java "-Dfile.encoding=UTF-8" -jar $jar `
+  --platform-path "C:\Program Files\1cv8\8.3.27.2214" `
+  --dump "D:\dump\1c_files"
 ```
 
 Без `--platform-path` сервер ищет установленную платформу в стандартных каталогах ОС и берёт самую

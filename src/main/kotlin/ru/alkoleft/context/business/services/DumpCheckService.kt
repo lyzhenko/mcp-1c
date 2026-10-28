@@ -17,8 +17,6 @@ import ru.alkoleft.context.infrastructure.dump.DumpTextReader
 import ru.alkoleft.context.infrastructure.dump.ParsedMetadataRef
 import ru.alkoleft.context.infrastructure.dump.ParsedRoutine
 import ru.alkoleft.context.infrastructure.search.PlatformCatalog
-import java.nio.file.Files
-import java.nio.file.Path
 import java.util.Locale
 
 /** Замечание проверки модуля. */
@@ -95,11 +93,7 @@ class DumpCheckService(
 
                     else -> throw InvalidSearchQueryException("укажите path, id или text")
                 }
-            val root = Path.of(storage.currentPath()!!).toAbsolutePath().normalize()
-            val file = root.resolve(module.path).normalize()
-            if (!file.startsWith(root) || !Files.isRegularFile(file)) {
-                throw DefinitionNotFoundException("файл «${module.path}»")
-            }
+            val file = storage.file(module.path) ?: throw DefinitionNotFoundException("файл «${module.path}»")
             moduleText = DumpTextReader.read(file)
             source = "file"
         }
